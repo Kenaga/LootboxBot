@@ -1,0 +1,16 @@
+{
+  "name": "lootbox-bot",
+  "version": "1.0.0",
+  "description": "A Discord bot that gives random lootbox rewards",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "keywords": ["discord", "bot", "lootbox"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.1"
+  }
+}
