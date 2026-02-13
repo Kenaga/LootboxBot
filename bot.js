@@ -11,9 +11,9 @@ const client = new Client({
 
 // Lootbox items with their probabilities
 const lootboxItems = [
-  { message: 'Blue 🔵', probability: 99.95 },
-  { message: 'Purple 🟣', probability: 0.04 },
-  { message: 'Gold 🟡', probability: 0.01 }
+  { message: 'Blue 🔵', probability: 99.2 },
+  { message: 'Purple 🟣', probability: 0.6 },
+  { message: 'Gold 🟡', probability: 0.2 }
 ];
 
 // Function to get a random item based on weighted probabilities
