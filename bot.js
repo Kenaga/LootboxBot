@@ -47,8 +47,7 @@ client.on('messageCreate', (message) => {
     const item = getRandomItem();
 
     // Send the lootbox result
-    const response = `🎁 **Lootbox opened!** 🎁\n${item}`;
-    message.reply(response);
+    message.reply(item);
   }
 });
 
