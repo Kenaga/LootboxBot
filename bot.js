@@ -46,8 +46,12 @@ client.on('messageCreate', (message) => {
     // Get 1 random item
     const item = getRandomItem();
 
-    // Send the lootbox result
-    message.reply(item);
+    // Check if it's a rare item (Purple or Gold) and ping the user
+    if (item.includes('Purple') || item.includes('Gold')) {
+      message.reply(`${message.author} ${item}`);
+    } else {
+      message.reply(item);
+    }
   }
 });
 
