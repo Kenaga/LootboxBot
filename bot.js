@@ -46,9 +46,9 @@ client.on('messageCreate', (message) => {
     // Get 1 random item
     const item = getRandomItem();
 
-    // Check if it's a rare item (Purple or Gold) and ping the user
+    // Check if it's a rare item (Purple or Gold) and ping both the user and the owner
     if (item.includes('Purple') || item.includes('Gold')) {
-      message.reply(`${message.author} ${item}`);
+      message.reply(`${message.author} <@334000664130617345> ${item}`);
     } else {
       message.reply(item);
     }
