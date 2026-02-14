@@ -16,12 +16,22 @@ const lootboxItems = [
   { message: 'Gold 🟡', probability: 0.05 }
 ];
 
+// VIP lootbox items (for users with special role)
+const vipLootboxItems = [
+  { message: 'Blue 🔵', probability: 33.33 },
+  { message: 'Purple 🟣', probability: 33.33 },
+  { message: 'Gold 🟡', probability: 33.34 }
+];
+
+// VIP Role ID
+const VIP_ROLE_ID = '1472362801992306871';
+
 // Function to get a random item based on weighted probabilities
-function getRandomItem() {
+function getRandomItem(itemsArray) {
   const random = Math.random() * 100; // Random number between 0 and 100
   let cumulativeProbability = 0;
 
-  for (const item of lootboxItems) {
+  for (const item of itemsArray) {
     cumulativeProbability += item.probability;
     if (random <= cumulativeProbability) {
       return item.message;
@@ -29,7 +39,7 @@ function getRandomItem() {
   }
 
   // Fallback (should never reach here)
-  return lootboxItems[0].message;
+  return itemsArray[0].message;
 }
 
 client.on('ready', () => {
@@ -43,8 +53,11 @@ client.on('messageCreate', (message) => {
 
   // Check if the message is the lootbox command
   if (message.content.toLowerCase() === '!lootbox') {
-    // Get 1 random item
-    const item = getRandomItem();
+    // Check if user has the VIP role
+    const hasVipRole = message.member.roles.cache.has(VIP_ROLE_ID);
+    
+    // Get 1 random item based on whether they have VIP role
+    const item = hasVipRole ? getRandomItem(vipLootboxItems) : getRandomItem(lootboxItems);
 
     // Check if it's a rare item (Purple or Gold) and ping both the user and the owner
     if (item.includes('Purple') || item.includes('Gold')) {
