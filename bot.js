@@ -11,9 +11,9 @@ const client = new Client({
 
 // Lootbox items with their probabilities
 const lootboxItems = [
-  { message: 'Blue 🔵', probability: 99.91 },
-  { message: 'Purple 🟣', probability: 0.07 },
-  { message: 'Gold 🟡', probability: 0.02 }
+  { message: 'Blue 🔵', probability: 99.945 },
+  { message: 'Purple 🟣', probability: 0.04 },
+  { message: 'Gold 🟡', probability: 0.015 }
 ];
 
 // VIP lootbox items (for users with special role)
