@@ -248,7 +248,7 @@ client.on('ready', async () => {
   }
 });
 
-client.on('messageCreate', (message) => {
+client.on('messageCreate', async (message) => {
   // Ignore messages from bots
   if (message.author.bot) return;
 
@@ -356,7 +356,7 @@ client.on('messageCreate', (message) => {
   }
 });
 
-client.on('messageUpdate', (oldMessage, newMessage) => {
+client.on('messageUpdate', async (oldMessage, newMessage) => {
   // Ignore messages from bots
   if (newMessage.author.bot) return;
 
