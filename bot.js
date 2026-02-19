@@ -7,6 +7,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers,
   ],
 });
 
@@ -117,6 +118,9 @@ const processedMessages = new Set();
 // Track Gambit role expiration timeouts (in-memory for active timers)
 const roleExpirations = new Map();
 
+// Track when bot is removing roles (to avoid triggering manual removal detection)
+const botRemovals = new Set();
+
 // Function to schedule role removal
 function scheduleRoleRemoval(userId, guildId, expiresAt) {
   const now = Date.now();
@@ -148,7 +152,13 @@ async function removeUserRole(userId, guildId) {
     const member = await guild.members.fetch(userId);
     const channel = await guild.channels.fetch(ECONOMY_CHANNEL);
     
+    // Mark this as a bot removal to avoid triggering manual removal detection
+    botRemovals.add(userId);
+    
     await member.roles.remove(VIP_ROLE_ID);
+    
+    // Remove from tracking after a short delay
+    setTimeout(() => botRemovals.delete(userId), 1000);
     
     if (channel) {
       channel.send(`<@${userId}> Your **Gambit** role has expired after 5 days. You can purchase it again with !gambit command!`);
@@ -393,6 +403,45 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
       return;
     }
     handleLootboxCommand(newMessage);
+  }
+});
+
+// Detect when Gambit role is manually removed by admin
+client.on('guildMemberUpdate', async (oldMember, newMember) => {
+  try {
+    // Check if Gambit role was removed
+    const hadRole = oldMember.roles.cache.has(VIP_ROLE_ID);
+    const hasRole = newMember.roles.cache.has(VIP_ROLE_ID);
+    
+    // If role was removed
+    if (hadRole && !hasRole) {
+      const userId = newMember.id;
+      
+      // Check if this was a bot removal (automated expiration)
+      if (botRemovals.has(userId)) {
+        return; // This was the bot removing it, don't notify
+      }
+      
+      // This was a manual removal by an admin
+      console.log(`Gambit role manually removed from user ${userId}`);
+      
+      // Clear the expiration timer
+      if (roleExpirations.has(userId)) {
+        clearTimeout(roleExpirations.get(userId));
+        roleExpirations.delete(userId);
+      }
+      
+      // Remove from database
+      await removeRoleExpiration(userId);
+      
+      // Notify the user in economy channel
+      const channel = await newMember.guild.channels.fetch(ECONOMY_CHANNEL);
+      if (channel) {
+        channel.send(`<@${userId}> Your **Gambit** role has been removed by an admin.`);
+      }
+    }
+  } catch (error) {
+    console.error('Error handling role update:', error);
   }
 });
 
