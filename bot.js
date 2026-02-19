@@ -204,13 +204,17 @@ async function handleLootboxCommand(message) {
   if (item.includes('Blue')) {
     const userId = message.author.id;
     
-    // Load user data if not in cache
-    if (!userCoins.has(userId)) {
-      await loadUserData(userId);
-    }
-    
+    // Get current coins from cache or default to 0
     const currentCoins = userCoins.get(userId) || 0;
-    await saveUserCoins(userId, currentCoins + 1);
+    const newCoins = currentCoins + 1;
+    
+    // Update cache immediately
+    userCoins.set(userId, newCoins);
+    
+    // Save to database asynchronously (non-blocking)
+    saveUserCoins(userId, newCoins).catch(err => 
+      console.error('Error saving coins:', err)
+    );
   }
 
   // Check if it's a rare item (Purple or Gold) and ping both the user and the owner
@@ -269,12 +273,14 @@ client.on('messageCreate', async (message) => {
     
     const userId = message.author.id;
     
-    // Load user data if not in cache
-    if (!userCoins.has(userId)) {
+    // Get from cache, or load from DB if not present
+    let coins = userCoins.get(userId);
+    
+    if (coins === undefined) {
       await loadUserData(userId);
+      coins = userCoins.get(userId) || 0;
     }
     
-    const coins = userCoins.get(userId) || 0;
     message.reply(`You have **${coins}** coins! 🪙`);
   }
 
@@ -285,12 +291,13 @@ client.on('messageCreate', async (message) => {
     
     const userId = message.author.id;
     
-    // Load user data if not in cache
-    if (!userCoins.has(userId)) {
-      await loadUserData(userId);
-    }
+    // Get from cache, or load from DB if not present
+    let coins = userCoins.get(userId);
     
-    const coins = userCoins.get(userId) || 0;
+    if (coins === undefined) {
+      await loadUserData(userId);
+      coins = userCoins.get(userId) || 0;
+    }
     
     // Check if user already has the role
     if (message.member.roles.cache.has(VIP_ROLE_ID)) {
@@ -305,17 +312,26 @@ client.on('messageCreate', async (message) => {
     }
     
     // Deduct coins and give role
-    await saveUserCoins(userId, coins - 40);
+    const newCoins = coins - 40;
+    userCoins.set(userId, newCoins);
+    
+    // Save to database asynchronously
+    saveUserCoins(userId, newCoins).catch(err => 
+      console.error('Error saving coins:', err)
+    );
+    
     message.member.roles.add(VIP_ROLE_ID)
       .then(async () => {
-        message.reply(`Congratulations! You've purchased the **Gambit** role for 40 coins! You now have **${coins - 40}** coins remaining.\n\n✨ Your chances for rare items have been increased!\n\nThe role will expire in 5 days. 🎉`);
+        message.reply(`Congratulations! You've purchased the **Gambit** role for 40 coins! You now have **${newCoins}** coins remaining.\n\n✨ Your chances for rare items have been increased!\n\nThe role will expire in 5 days. 🎉`);
         
         // Set up automatic role removal after 5 days
         const fiveDays = 5 * 24 * 60 * 60 * 1000; // 5 days in milliseconds
         const expiresAt = Date.now() + fiveDays;
         
-        // Save to database
-        await saveRoleExpiration(userId, expiresAt);
+        // Save to database asynchronously
+        saveRoleExpiration(userId, expiresAt).catch(err => 
+          console.error('Error saving role expiration:', err)
+        );
         
         // Schedule role removal
         scheduleRoleRemoval(userId, message.guild.id, expiresAt);
@@ -345,14 +361,23 @@ client.on('messageCreate', async (message) => {
     
     const targetUserId = targetUser.id;
     
-    // Load user data if not in cache
-    if (!userCoins.has(targetUserId)) {
+    // Get from cache, or load from DB if not present
+    let currentCoins = userCoins.get(targetUserId);
+    
+    if (currentCoins === undefined) {
       await loadUserData(targetUserId);
+      currentCoins = userCoins.get(targetUserId) || 0;
     }
     
-    const currentCoins = userCoins.get(targetUserId) || 0;
-    await saveUserCoins(targetUserId, currentCoins + amount);
-    message.reply(`Given **${amount} coins** to ${targetUser}! They now have **${currentCoins + amount}** coins.`);
+    const newCoins = currentCoins + amount;
+    userCoins.set(targetUserId, newCoins);
+    
+    // Save to database asynchronously
+    saveUserCoins(targetUserId, newCoins).catch(err => 
+      console.error('Error saving coins:', err)
+    );
+    
+    message.reply(`Given **${amount} coins** to ${targetUser}! They now have **${newCoins}** coins.`);
   }
 });
 
