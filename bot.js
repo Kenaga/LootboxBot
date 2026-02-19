@@ -108,7 +108,7 @@ async function removeUserRole(userId, guildId) {
     await member.roles.remove(VIP_ROLE_ID);
     
     if (channel) {
-      channel.send(`<@${userId}> Your **Gambit** role has expired after 5 days. You can purchase it again with !gambit command!`);
+      channel.send(`<@${userId}> Your **Gambit** role has expired after 30 seconds. You can purchase it again with !gambit command!`);
     }
     
     // Remove from database
@@ -238,11 +238,11 @@ client.on('messageCreate', (message) => {
     userCoins.set(userId, coins - 40);
     message.member.roles.add(VIP_ROLE_ID)
       .then(() => {
-        message.reply(`Congratulations! You've purchased the **Gambit** role for 40 coins! You now have **${coins - 40}** coins remaining.\n\n✨ Your chances for rare items have been increased!\n\nThe role will expire in 5 days. 🎉`);
+        message.reply(`Congratulations! You've purchased the **Gambit** role for 40 coins! You now have **${coins - 40}** coins remaining.\n\n✨ Your chances for rare items have been increased!\n\nThe role will expire in 30 seconds (testing mode). 🎉`);
         
-        // Set up automatic role removal after 5 days
-        const fiveDays = 5 * 24 * 60 * 60 * 1000; // 5 days in milliseconds
-        const expiresAt = Date.now() + fiveDays;
+        // Set up automatic role removal after 30 seconds (for testing)
+        const thirtySeconds = 30 * 1000; // 30 seconds in milliseconds
+        const expiresAt = Date.now() + thirtySeconds;
         
         // Save to database
         roleExpirationsData.set(userId, expiresAt.toString());
