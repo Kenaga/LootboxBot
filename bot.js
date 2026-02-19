@@ -56,6 +56,7 @@ async function saveUserCoins(userId, coins) {
       { upsert: true, new: true }
     );
     userCoins.set(userId, coins);
+    console.log(`💾 Saved ${coins} coins for user ${userId}`);
   } catch (error) {
     console.error('Error saving user coins:', error);
   }
