@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
-const fs = require('fs');
+const mongoose = require('mongoose');
 
 const client = new Client({
   intents: [
@@ -10,39 +10,82 @@ const client = new Client({
   ],
 });
 
-// Database file path
-const DB_FILE = './database.json';
+// Connect to MongoDB
+mongoose.connect(process.env.MONGODB_URI)
+  .then(() => console.log('✅ Connected to MongoDB'))
+  .catch(err => console.error('❌ MongoDB connection error:', err));
 
-// Load database
-function loadDatabase() {
+// Define MongoDB Schemas
+const userSchema = new mongoose.Schema({
+  userId: { type: String, required: true, unique: true },
+  coins: { type: Number, default: 0 },
+  roleExpiresAt: { type: Number, default: null }
+});
+
+const User = mongoose.model('User', userSchema);
+
+// In-memory cache for faster access
+const userCoins = new Map();
+const roleExpirationsData = new Map();
+
+// Load user data from database
+async function loadUserData(userId) {
   try {
-    if (fs.existsSync(DB_FILE)) {
-      const data = fs.readFileSync(DB_FILE, 'utf8');
-      return JSON.parse(data);
+    let user = await User.findOne({ userId });
+    if (!user) {
+      user = await User.create({ userId, coins: 0 });
     }
+    userCoins.set(userId, user.coins);
+    if (user.roleExpiresAt) {
+      roleExpirationsData.set(userId, user.roleExpiresAt);
+    }
+    return user;
   } catch (error) {
-    console.error('Error loading database:', error);
+    console.error('Error loading user data:', error);
+    return null;
   }
-  return { coins: {}, roleExpirations: {} };
 }
 
-// Save database
-function saveDatabase() {
+// Save user coins to database
+async function saveUserCoins(userId, coins) {
   try {
-    const data = {
-      coins: Object.fromEntries(userCoins),
-      roleExpirations: Object.fromEntries(roleExpirationsData)
-    };
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+    await User.findOneAndUpdate(
+      { userId },
+      { coins },
+      { upsert: true, new: true }
+    );
+    userCoins.set(userId, coins);
   } catch (error) {
-    console.error('Error saving database:', error);
+    console.error('Error saving user coins:', error);
   }
 }
 
-// Load initial data
-const db = loadDatabase();
-const userCoins = new Map(Object.entries(db.coins || {}));
-const roleExpirationsData = new Map(Object.entries(db.roleExpirations || {}));
+// Save role expiration to database
+async function saveRoleExpiration(userId, expiresAt) {
+  try {
+    await User.findOneAndUpdate(
+      { userId },
+      { roleExpiresAt: expiresAt },
+      { upsert: true, new: true }
+    );
+    roleExpirationsData.set(userId, expiresAt);
+  } catch (error) {
+    console.error('Error saving role expiration:', error);
+  }
+}
+
+// Remove role expiration from database
+async function removeRoleExpiration(userId) {
+  try {
+    await User.findOneAndUpdate(
+      { userId },
+      { roleExpiresAt: null }
+    );
+    roleExpirationsData.delete(userId);
+  } catch (error) {
+    console.error('Error removing role expiration:', error);
+  }
+}
 
 // Lootbox items with their probabilities
 const lootboxItems = [
@@ -112,9 +155,8 @@ async function removeUserRole(userId, guildId) {
     }
     
     // Remove from database
-    roleExpirationsData.delete(userId);
+    await removeRoleExpiration(userId);
     roleExpirations.delete(userId);
-    saveDatabase();
     
     console.log(`Removed Gambit role from user ${userId}`);
   } catch (error) {
@@ -139,7 +181,7 @@ function getRandomItem(itemsArray) {
 }
 
 // Function to handle lootbox command
-function handleLootboxCommand(message) {
+async function handleLootboxCommand(message) {
   // Check if this message has already been processed
   if (processedMessages.has(message.id)) return;
 
@@ -161,9 +203,14 @@ function handleLootboxCommand(message) {
   // Award coins (1 coin for Blue only)
   if (item.includes('Blue')) {
     const userId = message.author.id;
+    
+    // Load user data if not in cache
+    if (!userCoins.has(userId)) {
+      await loadUserData(userId);
+    }
+    
     const currentCoins = userCoins.get(userId) || 0;
-    userCoins.set(userId, currentCoins + 1);
-    saveDatabase();
+    await saveUserCoins(userId, currentCoins + 1);
   }
 
   // Check if it's a rare item (Purple or Gold) and ping both the user and the owner
@@ -174,26 +221,31 @@ function handleLootboxCommand(message) {
   }
 }
 
-client.on('ready', () => {
+client.on('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}!`);
   console.log(`🎁 Lootbox bot is ready!`);
   
-  // Restore role expiration timers from database
-  for (const [userId, expiresAt] of roleExpirationsData.entries()) {
-    const guildId = client.guilds.cache.first()?.id;
-    if (guildId) {
-      scheduleRoleRemoval(userId, guildId, parseInt(expiresAt));
+  // Load all users from database
+  try {
+    const users = await User.find({});
+    for (const user of users) {
+      userCoins.set(user.userId, user.coins);
+      if (user.roleExpiresAt) {
+        roleExpirationsData.set(user.userId, user.roleExpiresAt);
+        
+        // Restore role expiration timers
+        const guildId = client.guilds.cache.first()?.id;
+        if (guildId) {
+          scheduleRoleRemoval(user.userId, guildId, user.roleExpiresAt);
+        }
+      }
     }
+    
+    console.log(`📊 Loaded ${userCoins.size} users with coins`);
+    console.log(`⏰ Restored ${roleExpirationsData.size} role expiration timers`);
+  } catch (error) {
+    console.error('Error loading users from database:', error);
   }
-  
-  console.log(`📊 Loaded ${userCoins.size} users with coins`);
-  console.log(`⏰ Restored ${roleExpirationsData.size} role expiration timers`);
-  
-  // Auto-save database every 5 minutes to prevent data loss
-  setInterval(() => {
-    saveDatabase();
-    console.log('💾 Auto-saved database');
-  }, 5 * 60 * 1000);
 });
 
 client.on('messageCreate', (message) => {
@@ -216,6 +268,12 @@ client.on('messageCreate', (message) => {
     if (message.channel.id !== ECONOMY_CHANNEL) return;
     
     const userId = message.author.id;
+    
+    // Load user data if not in cache
+    if (!userCoins.has(userId)) {
+      await loadUserData(userId);
+    }
+    
     const coins = userCoins.get(userId) || 0;
     message.reply(`You have **${coins}** coins! 🪙`);
   }
@@ -226,6 +284,12 @@ client.on('messageCreate', (message) => {
     if (message.channel.id !== ECONOMY_CHANNEL) return;
     
     const userId = message.author.id;
+    
+    // Load user data if not in cache
+    if (!userCoins.has(userId)) {
+      await loadUserData(userId);
+    }
+    
     const coins = userCoins.get(userId) || 0;
     
     // Check if user already has the role
@@ -241,9 +305,9 @@ client.on('messageCreate', (message) => {
     }
     
     // Deduct coins and give role
-    userCoins.set(userId, coins - 40);
+    await saveUserCoins(userId, coins - 40);
     message.member.roles.add(VIP_ROLE_ID)
-      .then(() => {
+      .then(async () => {
         message.reply(`Congratulations! You've purchased the **Gambit** role for 40 coins! You now have **${coins - 40}** coins remaining.\n\n✨ Your chances for rare items have been increased!\n\nThe role will expire in 5 days. 🎉`);
         
         // Set up automatic role removal after 5 days
@@ -251,8 +315,7 @@ client.on('messageCreate', (message) => {
         const expiresAt = Date.now() + fiveDays;
         
         // Save to database
-        roleExpirationsData.set(userId, expiresAt.toString());
-        saveDatabase();
+        await saveRoleExpiration(userId, expiresAt);
         
         // Schedule role removal
         scheduleRoleRemoval(userId, message.guild.id, expiresAt);
@@ -280,9 +343,15 @@ client.on('messageCreate', (message) => {
       return;
     }
     
-    const currentCoins = userCoins.get(targetUser.id) || 0;
-    userCoins.set(targetUser.id, currentCoins + amount);
-    saveDatabase();
+    const targetUserId = targetUser.id;
+    
+    // Load user data if not in cache
+    if (!userCoins.has(targetUserId)) {
+      await loadUserData(targetUserId);
+    }
+    
+    const currentCoins = userCoins.get(targetUserId) || 0;
+    await saveUserCoins(targetUserId, currentCoins + amount);
     message.reply(`Given **${amount} coins** to ${targetUser}! They now have **${currentCoins + amount}** coins.`);
   }
 });
