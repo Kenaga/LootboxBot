@@ -44,14 +44,6 @@ const db = loadDatabase();
 const userCoins = new Map(Object.entries(db.coins || {}));
 const roleExpirationsData = new Map(Object.entries(db.roleExpirations || {}));
 
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-  ],
-});
-
 // Lootbox items with their probabilities
 const lootboxItems = [
   { message: 'Blue 🔵', probability: 99.945 },
