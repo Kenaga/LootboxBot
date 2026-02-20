@@ -739,9 +739,9 @@ client.on('messageCreate', async (message) => {
     }
     
     // Custom emojis
-    const emoji1 = '<:emoji1:1403981675540516965>#';
-    const emoji2 = '<:emoji2:1452790713401217165>#';
-    const emoji3 = '<:emoji3:1350188678668095572>#';
+    const emoji1 = '<:emoji1:1403981675540516965>';
+    const emoji2 = '<:emoji2:1452790713401217165>';
+    const emoji3 = '<:emoji3:1350188678668095572>';
     const slotEmojis = [emoji1, emoji2, emoji3];
     
     // Spin the slots
@@ -773,7 +773,7 @@ client.on('messageCreate', async (message) => {
     saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
     
     let replyText = `🎰 **SLOTS**\n\n` +
-      `${reel1} ${reel2} ${reel3}\n\n` +
+      `# ${reel1} ${reel2} ${reel3}\n\n` +
       `${resultText}\n`;
     
     if (coinsChange > 0) {
