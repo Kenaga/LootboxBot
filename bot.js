@@ -20,13 +20,21 @@ mongoose.connect(process.env.MONGODB_URI)
 const userSchema = new mongoose.Schema({
   userId: { type: String, required: true, unique: true },
   coins: { type: Number, default: 0 },
-  roleExpiresAt: { type: Number, default: null }
+  roleExpiresAt: { type: Number, default: null },
+  stats: {
+    blues: { type: Number, default: 0 },
+    purples: { type: Number, default: 0 },
+    golds: { type: Number, default: 0 },
+    slotsWins: { type: Number, default: 0 },
+    blackjackWins: { type: Number, default: 0 }
+  }
 });
 
 const User = mongoose.model('User', userSchema);
 
 // In-memory cache for faster access
 const userCoins = new Map();
+const userStats = new Map();
 const roleExpirationsData = new Map();
 
 // Load user data from database
@@ -37,6 +45,7 @@ async function loadUserData(userId) {
       user = await User.create({ userId, coins: 0 });
     }
     userCoins.set(userId, user.coins);
+    userStats.set(userId, user.stats || { blues: 0, purples: 0, golds: 0, slotsWins: 0, blackjackWins: 0 });
     if (user.roleExpiresAt) {
       roleExpirationsData.set(userId, user.roleExpiresAt);
     }
@@ -59,6 +68,23 @@ async function saveUserCoins(userId, coins) {
     console.log(`💾 Saved ${coins} coins for user ${userId}`);
   } catch (error) {
     console.error('Error saving user coins:', error);
+  }
+}
+
+// Increment a stat for a user
+async function incrementStat(userId, statName) {
+  try {
+    const stats = userStats.get(userId) || { blues: 0, purples: 0, golds: 0, slotsWins: 0, blackjackWins: 0 };
+    stats[statName] = (stats[statName] || 0) + 1;
+    userStats.set(userId, stats);
+    
+    await User.findOneAndUpdate(
+      { userId },
+      { $inc: { [`stats.${statName}`]: 1 } },
+      { upsert: true }
+    );
+  } catch (error) {
+    console.error('Error incrementing stat:', error);
   }
 }
 
@@ -284,6 +310,17 @@ async function handleLootboxCommand(message) {
     saveUserCoins(userId, newCoins).catch(err => 
       console.error('Error saving coins:', err)
     );
+    
+    // Track blue stat
+    incrementStat(userId, 'blues').catch(err => console.error('Error tracking stat:', err));
+  }
+
+  if (item.includes('Purple')) {
+    incrementStat(message.author.id, 'purples').catch(err => console.error('Error tracking stat:', err));
+  }
+
+  if (item.includes('Gold')) {
+    incrementStat(message.author.id, 'golds').catch(err => console.error('Error tracking stat:', err));
   }
 
   // Check if it's a rare item (Purple or Gold) and ping both the user and the owner
@@ -303,6 +340,7 @@ client.on('ready', async () => {
     const users = await User.find({});
     for (const user of users) {
       userCoins.set(user.userId, user.coins);
+      userStats.set(user.userId, user.stats || { blues: 0, purples: 0, golds: 0, slotsWins: 0, blackjackWins: 0 });
       if (user.roleExpiresAt) {
         roleExpirationsData.set(user.userId, user.roleExpiresAt);
         
@@ -500,6 +538,7 @@ client.on('messageCreate', async (message) => {
       const newCoins = Math.max(0, coins + winnings);
       userCoins.set(userId, newCoins);
       saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
+      incrementStat(userId, 'blackjackWins').catch(err => console.error('Error tracking stat:', err));
       
       message.reply(
         `🃏 **BLACKJACK!** 🎉\n\n` +
@@ -624,10 +663,12 @@ client.on('messageCreate', async (message) => {
       // Dealer bust, player wins
       result = '**You win!** Dealer busted! 🎉';
       coinsChange = game.bet;
+      incrementStat(userId, 'blackjackWins').catch(err => console.error('Error tracking stat:', err));
     } else if (playerValue > dealerValue) {
       // Player has higher value
       result = '**You win!** 🎉';
       coinsChange = game.bet;
+      incrementStat(userId, 'blackjackWins').catch(err => console.error('Error tracking stat:', err));
     } else if (playerValue < dealerValue) {
       // Dealer has higher value
       result = '**You lose!** 😭';
@@ -713,13 +754,14 @@ client.on('messageCreate', async (message) => {
     let resultText = '';
     
     if (reel1 === reel2 && reel2 === reel3) {
-      // All 3 match - triple coins (win 2x the bet)
+      // All 3 match - win 3x the bet
       resultText = '🎰 **JACKPOT! THREE OF A KIND!** 🎉';
-      coinsChange = bet * 2;
+      coinsChange = bet * 3;
+      incrementStat(userId, 'slotsWins').catch(err => console.error('Error tracking stat:', err));
     } else if (reel1 === reel2 || reel2 === reel3 || reel1 === reel3) {
-      // 2 match - double coins (win 1x the bet)
-      resultText = '🎰 **TWO OF A KIND!** 🎊';
-      coinsChange = bet;
+      // 2 match - no win or loss
+      resultText = '🎰 **TWO OF A KIND!** - No win, no loss! 🤝';
+      coinsChange = 0;
     } else {
       // No matches - lose
       resultText = '💔 **No luck!** You lose!';
@@ -743,6 +785,59 @@ client.on('messageCreate', async (message) => {
     replyText += `Balance: **${newCoins}** coins`;
     
     message.reply(replyText);
+  }
+
+  // Leaderboard command
+  if (message.content.toLowerCase() === '!leaderboard') {
+    // Check if in allowed channels
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+
+    const userId = message.author.id;
+
+    // Fetch top 5 users by coins from database
+    const topUsers = await User.find().sort({ coins: -1 }).limit(5);
+
+    // Find the calling user's rank
+    const allUsers = await User.find().sort({ coins: -1 });
+    const userRank = allUsers.findIndex(u => u.userId === userId) + 1;
+    const userData = allUsers.find(u => u.userId === userId);
+
+    // Format a user entry
+    const formatEntry = async (user, rank) => {
+      let username = `Unknown User`;
+      try {
+        const member = await message.guild.members.fetch(user.userId);
+        username = member.displayName;
+      } catch {
+        // User might have left the server
+      }
+      const s = user.stats || {};
+      return (
+        `**#${rank} — ${username}**\n` +
+        `🪙 Coins: **${user.coins}**\n` +
+        `🔵 Blues: **${s.blues || 0}** | 🟣 Purples: **${s.purples || 0}** | 🟡 Golds: **${s.golds || 0}**\n` +
+        `🎰 Slots Wins: **${s.slotsWins || 0}** | 🃏 Blackjack Wins: **${s.blackjackWins || 0}**`
+      );
+    };
+
+    // Build top 5 entries
+    let leaderboardText = `🏆 **LEADERBOARD — Top 5**\n\n`;
+    for (let i = 0; i < topUsers.length; i++) {
+      leaderboardText += await formatEntry(topUsers[i], i + 1);
+      leaderboardText += '\n\n';
+    }
+
+    // Add calling user's entry if not in top 5
+    if (userRank > 5 && userData) {
+      leaderboardText += `─────────────────\n`;
+      leaderboardText += `📍 **Your Position**\n`;
+      leaderboardText += await formatEntry(userData, userRank);
+    } else if (!userData) {
+      leaderboardText += `─────────────────\n`;
+      leaderboardText += `📍 You haven't opened any lootboxes yet!`;
+    }
+
+    message.reply(leaderboardText);
   }
 });
 
