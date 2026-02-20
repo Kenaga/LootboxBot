@@ -680,9 +680,9 @@ client.on('messageCreate', async (message) => {
       result = '**You lose!** 😭';
       coinsChange = -game.bet;
     } else {
-      // Tie - user loses their bet
-      result = '**Push!** It\'s a tie! You lose your bet. 😬';
-      coinsChange = -game.bet;
+      // Tie - user gets their bet back
+      result = '**Push!** It\'s a tie! 🤝';
+      coinsChange = 0;
     }
     
     const newCoins = Math.max(0, game.startCoins + coinsChange);
