@@ -98,9 +98,9 @@ const lootboxItems = [
 
 // VIP lootbox items (for users with special role)
 const vipLootboxItems = [
-  { message: 'Blue 🔵', probability: 97.5 },
-  { message: 'Purple 🟣', probability: 2 },
-  { message: 'Gold 🟡', probability: 0.5 }
+  { message: 'Blue 🔵', probability: 98.7 },
+  { message: 'Purple 🟣', probability: 1 },
+  { message: 'Gold 🟡', probability: 0.3 }
 ];
 
 // VIP Role ID
@@ -662,6 +662,75 @@ client.on('messageCreate', async (message) => {
     if (coinsChange > 0) {
       replyText += `You won **${coinsChange}** coins! 💰\n`;
     } else if (coinsChange < 0) {
+      replyText += `You lost **${Math.abs(coinsChange)}** coins! 💸\n`;
+    }
+    
+    replyText += `Balance: **${newCoins}** coins`;
+    
+    message.reply(replyText);
+  }
+
+  // Slots command
+  if (message.content.toLowerCase().startsWith('!slots')) {
+    // Check if in allowed channels
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+    
+    const userId = message.author.id;
+    const args = message.content.split(' ');
+    const bet = parseInt(args[1]);
+    
+    if (isNaN(bet) || bet <= 0) {
+      message.reply(`Usage: \`!slots <bet>\`\nExample: \`!slots 10\``);
+      return;
+    }
+    
+    // Get user coins
+    let coins = userCoins.get(userId);
+    if (coins === undefined) {
+      await loadUserData(userId);
+      coins = userCoins.get(userId) || 0;
+    }
+    
+    // Check if user has enough coins
+    if (coins < bet) {
+      message.reply(`You don't have enough coins! You have **${coins}** coins but tried to bet **${bet}** coins.`);
+      return;
+    }
+    
+    // Custom emojis
+    const emoji1 = '<:emoji1:1403981675540516965>';
+    const emoji2 = '<:emoji2:1452790713401217165>';
+    const emoji3 = '<:emoji3:1350188678668095572>';
+    const slotEmojis = [emoji1, emoji2, emoji3];
+    
+    // Spin the slots
+    const reel1 = slotEmojis[Math.floor(Math.random() * slotEmojis.length)];
+    const reel2 = slotEmojis[Math.floor(Math.random() * slotEmojis.length)];
+    const reel3 = slotEmojis[Math.floor(Math.random() * slotEmojis.length)];
+    
+    // Check for matches
+    let coinsChange = 0;
+    let resultText = '';
+    
+    if (reel1 === reel2 && reel2 === reel3) {
+      // All 3 match - win the bet amount back (no loss, no gain)
+      resultText = '🎰 **THREE OF A KIND!** 🎉\nYou got your bet back!';
+      coinsChange = 0;
+    } else {
+      // 2 matches or no matches - lose
+      resultText = '💔 **No luck!** You lose!';
+      coinsChange = -bet;
+    }
+    
+    const newCoins = Math.max(0, coins + coinsChange);
+    userCoins.set(userId, newCoins);
+    saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
+    
+    let replyText = `🎰 **SLOTS**\n\n` +
+      `${reel1} ${reel2} ${reel3}\n\n` +
+      `${resultText}\n`;
+    
+    if (coinsChange < 0) {
       replyText += `You lost **${Math.abs(coinsChange)}** coins! 💸\n`;
     }
     
