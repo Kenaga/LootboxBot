@@ -713,11 +713,15 @@ client.on('messageCreate', async (message) => {
     let resultText = '';
     
     if (reel1 === reel2 && reel2 === reel3) {
-      // All 3 match - win the bet amount back (no loss, no gain)
-      resultText = '🎰 **THREE OF A KIND!** 🎉\nYou got your bet back!';
-      coinsChange = 0;
+      // All 3 match - triple coins (win 2x the bet)
+      resultText = '🎰 **JACKPOT! THREE OF A KIND!** 🎉';
+      coinsChange = bet * 2;
+    } else if (reel1 === reel2 || reel2 === reel3 || reel1 === reel3) {
+      // 2 match - double coins (win 1x the bet)
+      resultText = '🎰 **TWO OF A KIND!** 🎊';
+      coinsChange = bet;
     } else {
-      // 2 matches or no matches - lose
+      // No matches - lose
       resultText = '💔 **No luck!** You lose!';
       coinsChange = -bet;
     }
@@ -730,7 +734,9 @@ client.on('messageCreate', async (message) => {
       `${reel1} ${reel2} ${reel3}\n\n` +
       `${resultText}\n`;
     
-    if (coinsChange < 0) {
+    if (coinsChange > 0) {
+      replyText += `You won **${coinsChange}** coins! 💰\n`;
+    } else if (coinsChange < 0) {
       replyText += `You lost **${Math.abs(coinsChange)}** coins! 💸\n`;
     }
     
