@@ -123,6 +123,63 @@ const roleExpirations = new Map();
 // Track when bot is removing roles (to avoid triggering manual removal detection)
 const botRemovals = new Set();
 
+// Track active blackjack games
+const activeBlackjackGames = new Map();
+
+// Blackjack deck and logic
+const CARD_SUITS = ['♠️', '♥️', '♣️', '♦️'];
+const CARD_VALUES = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+
+function createDeck() {
+  const deck = [];
+  for (const suit of CARD_SUITS) {
+    for (const value of CARD_VALUES) {
+      deck.push({ value, suit, display: `${value}${suit}` });
+    }
+  }
+  return deck;
+}
+
+function shuffleDeck(deck) {
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
+}
+
+function getCardValue(card) {
+  if (card.value === 'A') return 11;
+  if (['J', 'Q', 'K'].includes(card.value)) return 10;
+  return parseInt(card.value);
+}
+
+function calculateHandValue(hand) {
+  let value = 0;
+  let aces = 0;
+  
+  for (const card of hand) {
+    const cardValue = getCardValue(card);
+    value += cardValue;
+    if (card.value === 'A') aces++;
+  }
+  
+  // Adjust for aces
+  while (value > 21 && aces > 0) {
+    value -= 10;
+    aces--;
+  }
+  
+  return value;
+}
+
+function formatHand(hand, hideFirst = false) {
+  if (hideFirst) {
+    return `🂠 ${hand.slice(1).map(c => c.display).join(' ')}`;
+  }
+  return hand.map(c => c.display).join(' ');
+}
+
 // Function to schedule role removal
 function scheduleRoleRemoval(userId, guildId, expiresAt) {
   const now = Date.now();
@@ -390,6 +447,222 @@ client.on('messageCreate', async (message) => {
     );
     
     message.reply(`Given **${amount} coins** to ${targetUser}! They now have **${newCoins}** coins.`);
+  }
+
+  // Blackjack command
+  if (message.content.toLowerCase().startsWith('!blackjack')) {
+    // Check if in allowed channels
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+    
+    const userId = message.author.id;
+    
+    // Check if user already has an active game
+    if (activeBlackjackGames.has(userId)) {
+      message.reply(`You already have an active blackjack game! Use \`!hit\` or \`!stand\` to continue.`);
+      return;
+    }
+    
+    const args = message.content.split(' ');
+    const bet = parseInt(args[1]);
+    
+    if (isNaN(bet) || bet <= 0) {
+      message.reply(`Usage: \`!blackjack <bet>\`\nExample: \`!blackjack 10\``);
+      return;
+    }
+    
+    // Get user coins
+    let coins = userCoins.get(userId);
+    if (coins === undefined) {
+      await loadUserData(userId);
+      coins = userCoins.get(userId) || 0;
+    }
+    
+    // Check if user has enough coins
+    if (coins < bet) {
+      message.reply(`You don't have enough coins! You have **${coins}** coins but tried to bet **${bet}** coins.`);
+      return;
+    }
+    
+    // Create and shuffle deck
+    const deck = shuffleDeck(createDeck());
+    
+    // Deal initial cards
+    const playerHand = [deck.pop(), deck.pop()];
+    const dealerHand = [deck.pop(), deck.pop()];
+    
+    const playerValue = calculateHandValue(playerHand);
+    const dealerValue = calculateHandValue(dealerHand);
+    
+    // Check for immediate blackjack or bust
+    if (playerValue === 21) {
+      // Player blackjack!
+      const winnings = bet * 2;
+      const newCoins = Math.max(0, coins + winnings);
+      userCoins.set(userId, newCoins);
+      saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
+      
+      message.reply(
+        `🃏 **BLACKJACK!** 🎉\n\n` +
+        `Your hand: ${formatHand(playerHand)} = **${playerValue}**\n` +
+        `Dealer hand: ${formatHand(dealerHand)} = **${dealerValue}**\n\n` +
+        `You win **${winnings}** coins! 💰\n` +
+        `Balance: **${newCoins}** coins`
+      );
+      return;
+    }
+    
+    if (dealerValue === 21) {
+      // Dealer blackjack!
+      const loss = bet * 3;
+      const newCoins = Math.max(0, coins - loss);
+      userCoins.set(userId, newCoins);
+      saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
+      
+      message.reply(
+        `🃏 **Dealer Blackjack!** 😭\n\n` +
+        `Your hand: ${formatHand(playerHand)} = **${playerValue}**\n` +
+        `Dealer hand: ${formatHand(dealerHand)} = **${dealerValue}**\n\n` +
+        `You lose **${loss}** coins! 💸\n` +
+        `Balance: **${newCoins}** coins`
+      );
+      return;
+    }
+    
+    // Save game state
+    activeBlackjackGames.set(userId, {
+      deck,
+      playerHand,
+      dealerHand,
+      bet,
+      startCoins: coins
+    });
+    
+    message.reply(
+      `🃏 **Blackjack Started!**\n\n` +
+      `Your hand: ${formatHand(playerHand)} = **${playerValue}**\n` +
+      `Dealer hand: ${formatHand(dealerHand, true)}\n\n` +
+      `Bet: **${bet}** coins\n\n` +
+      `Type \`!hit\` to draw another card or \`!stand\` to hold.`
+    );
+  }
+
+  // Hit command
+  if (message.content.toLowerCase() === '!hit') {
+    // Check if in allowed channels
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+    
+    const userId = message.author.id;
+    const game = activeBlackjackGames.get(userId);
+    
+    if (!game) {
+      message.reply(`You don't have an active blackjack game! Start one with \`!blackjack <bet>\``);
+      return;
+    }
+    
+    // Draw a card
+    const newCard = game.deck.pop();
+    game.playerHand.push(newCard);
+    
+    const playerValue = calculateHandValue(game.playerHand);
+    
+    // Check for bust
+    if (playerValue > 21) {
+      const loss = game.bet * 3;
+      const newCoins = Math.max(0, game.startCoins - loss);
+      userCoins.set(userId, newCoins);
+      saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
+      
+      activeBlackjackGames.delete(userId);
+      
+      message.reply(
+        `🃏 **BUST!** 💥\n\n` +
+        `Your hand: ${formatHand(game.playerHand)} = **${playerValue}**\n\n` +
+        `You lose **${loss}** coins! 💸\n` +
+        `Balance: **${newCoins}** coins`
+      );
+      return;
+    }
+    
+    message.reply(
+      `🃏 **You drew: ${newCard.display}**\n\n` +
+      `Your hand: ${formatHand(game.playerHand)} = **${playerValue}**\n` +
+      `Dealer hand: ${formatHand(game.dealerHand, true)}\n\n` +
+      `Type \`!hit\` to draw another card or \`!stand\` to hold.`
+    );
+  }
+
+  // Stand command
+  if (message.content.toLowerCase() === '!stand') {
+    // Check if in allowed channels
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+    
+    const userId = message.author.id;
+    const game = activeBlackjackGames.get(userId);
+    
+    if (!game) {
+      message.reply(`You don't have an active blackjack game! Start one with \`!blackjack <bet>\``);
+      return;
+    }
+    
+    const playerValue = calculateHandValue(game.playerHand);
+    let dealerValue = calculateHandValue(game.dealerHand);
+    
+    // Dealer draws until 17 or higher
+    const dealerDraws = [];
+    while (dealerValue < 17) {
+      const newCard = game.deck.pop();
+      game.dealerHand.push(newCard);
+      dealerDraws.push(newCard.display);
+      dealerValue = calculateHandValue(game.dealerHand);
+    }
+    
+    let result = '';
+    let coinsChange = 0;
+    
+    // Determine winner
+    if (dealerValue > 21) {
+      // Dealer bust, player wins
+      result = '**You win!** Dealer busted! 🎉';
+      coinsChange = game.bet * 2;
+    } else if (playerValue > dealerValue) {
+      // Player has higher value
+      result = '**You win!** 🎉';
+      coinsChange = game.bet * 2;
+    } else if (playerValue < dealerValue) {
+      // Dealer has higher value
+      result = '**You lose!** 😭';
+      coinsChange = -(game.bet * 3);
+    } else {
+      // Tie
+      result = '**Push!** It\'s a tie! 🤝';
+      coinsChange = 0;
+    }
+    
+    const newCoins = Math.max(0, game.startCoins + coinsChange);
+    userCoins.set(userId, newCoins);
+    saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
+    
+    activeBlackjackGames.delete(userId);
+    
+    let replyText = `🃏 **Game Over!**\n\n` +
+      `Your hand: ${formatHand(game.playerHand)} = **${playerValue}**\n` +
+      `Dealer hand: ${formatHand(game.dealerHand)} = **${dealerValue}**\n`;
+    
+    if (dealerDraws.length > 0) {
+      replyText += `Dealer drew: ${dealerDraws.join(' ')}\n`;
+    }
+    
+    replyText += `\n${result}\n`;
+    
+    if (coinsChange > 0) {
+      replyText += `You won **${coinsChange}** coins! 💰\n`;
+    } else if (coinsChange < 0) {
+      replyText += `You lost **${Math.abs(coinsChange)}** coins! 💸\n`;
+    }
+    
+    replyText += `Balance: **${newCoins}** coins`;
+    
+    message.reply(replyText);
   }
 });
 
