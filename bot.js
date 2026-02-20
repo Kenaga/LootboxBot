@@ -514,8 +514,14 @@ client.on('messageCreate', async (message) => {
       await loadUserData(userId);
       coins = userCoins.get(userId) || 0;
     }
+
+    // Check if user has any coins at all
+    if (coins <= 0) {
+      message.reply(`You don't have any coins to play Blackjack! Use \`!lootbox\` to earn coins.`);
+      return;
+    }
     
-    // Check if user has enough coins
+    // Check if user has enough coins for the bet
     if (coins < bet) {
       message.reply(`You don't have enough coins! You have **${coins}** coins but tried to bet **${bet}** coins.`);
       return;
@@ -674,9 +680,9 @@ client.on('messageCreate', async (message) => {
       result = '**You lose!** 😭';
       coinsChange = -game.bet;
     } else {
-      // Tie
-      result = '**Push!** It\'s a tie! 🤝';
-      coinsChange = 0;
+      // Tie - user loses their bet
+      result = '**Push!** It\'s a tie! You lose your bet. 😬';
+      coinsChange = -game.bet;
     }
     
     const newCoins = Math.max(0, game.startCoins + coinsChange);
