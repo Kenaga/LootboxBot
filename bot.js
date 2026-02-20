@@ -649,7 +649,7 @@ client.on('messageCreate', async (message) => {
     
     let replyText = `🃏 **Game Over!**\n\n` +
       `Your hand: ${formatHand(game.playerHand)} = **${playerValue}**\n\n` +
-      `Dealer shows: ${hiddenCard}\n`;
+      `Dealer reveals: ${hiddenCard}\n`;
     
     if (dealerDraws.length > 0) {
       replyText += `Dealer drew: ${dealerDraws.join(' ')}\n`;
