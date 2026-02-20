@@ -496,7 +496,7 @@ client.on('messageCreate', async (message) => {
     // Check for immediate blackjack or bust
     if (playerValue === 21) {
       // Player blackjack!
-      const winnings = bet * 2;
+      const winnings = bet;
       const newCoins = Math.max(0, coins + winnings);
       userCoins.set(userId, newCoins);
       saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
@@ -513,7 +513,7 @@ client.on('messageCreate', async (message) => {
     
     if (dealerValue === 21) {
       // Dealer blackjack!
-      const loss = bet * 3;
+      const loss = bet;
       const newCoins = Math.max(0, coins - loss);
       userCoins.set(userId, newCoins);
       saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
@@ -567,7 +567,7 @@ client.on('messageCreate', async (message) => {
     
     // Check for bust
     if (playerValue > 21) {
-      const loss = game.bet * 3;
+      const loss = game.bet;
       const newCoins = Math.max(0, game.startCoins - loss);
       userCoins.set(userId, newCoins);
       saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
@@ -623,15 +623,15 @@ client.on('messageCreate', async (message) => {
     if (dealerValue > 21) {
       // Dealer bust, player wins
       result = '**You win!** Dealer busted! 🎉';
-      coinsChange = game.bet * 2;
+      coinsChange = game.bet;
     } else if (playerValue > dealerValue) {
       // Player has higher value
       result = '**You win!** 🎉';
-      coinsChange = game.bet * 2;
+      coinsChange = game.bet;
     } else if (playerValue < dealerValue) {
       // Dealer has higher value
       result = '**You lose!** 😭';
-      coinsChange = -(game.bet * 3);
+      coinsChange = -game.bet;
     } else {
       // Tie
       result = '**Push!** It\'s a tie! 🤝';
