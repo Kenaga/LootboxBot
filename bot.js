@@ -644,15 +644,20 @@ client.on('messageCreate', async (message) => {
     
     activeBlackjackGames.delete(userId);
     
+    // Format the end game display
+    const hiddenCard = game.dealerHand[0].display;
+    
     let replyText = `🃏 **Game Over!**\n\n` +
-      `Your hand: ${formatHand(game.playerHand)} = **${playerValue}**\n` +
-      `Dealer hand: ${formatHand(game.dealerHand)} = **${dealerValue}**\n`;
+      `Your hand: ${formatHand(game.playerHand)} = **${playerValue}**\n\n` +
+      `Dealer shows: ${hiddenCard}\n`;
     
     if (dealerDraws.length > 0) {
       replyText += `Dealer drew: ${dealerDraws.join(' ')}\n`;
     }
     
-    replyText += `\n${result}\n`;
+    replyText += `Dealer hand: ${formatHand(game.dealerHand)} = **${dealerValue}**\n\n`;
+    
+    replyText += `${result}\n`;
     
     if (coinsChange > 0) {
       replyText += `You won **${coinsChange}** coins! 💰\n`;
