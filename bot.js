@@ -788,9 +788,40 @@ client.on('messageCreate', async (message) => {
   }
 
   // Leaderboard command
-  if (message.content.toLowerCase() === '!leaderboard') {
+  if (message.content.toLowerCase().startsWith('!leaderboard')) {
     // Check if in allowed channels
     if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+
+    // Handle reset subcommand (admin only)
+    if (message.content.toLowerCase().startsWith('!leaderboard reset')) {
+      // Check if user is admin
+      if (message.author.id !== ADMIN_USER_ID) return;
+
+      const targetUser = message.mentions.users.first();
+      if (!targetUser) {
+        message.reply(`Usage: \`!leaderboard reset @user\``);
+        return;
+      }
+
+      const targetUserId = targetUser.id;
+
+      // Reset all stats and coins in database
+      await User.findOneAndUpdate(
+        { userId: targetUserId },
+        {
+          coins: 0,
+          stats: { blues: 0, purples: 0, golds: 0, slotsWins: 0, blackjackWins: 0 }
+        },
+        { upsert: true }
+      );
+
+      // Reset cache
+      userCoins.set(targetUserId, 0);
+      userStats.set(targetUserId, { blues: 0, purples: 0, golds: 0, slotsWins: 0, blackjackWins: 0 });
+
+      message.reply(`✅ Successfully reset all leaderboard stats and coins for ${targetUser}!`);
+      return;
+    }
 
     const userId = message.author.id;
 
