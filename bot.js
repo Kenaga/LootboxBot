@@ -109,6 +109,7 @@ const VIP_ROLE_ID = '1472362801992306871';
 // Channel IDs
 const LOOTBOX_CHANNELS = ['1471881938502418442', '1265305843331497995'];
 const ECONOMY_CHANNEL = '1474179171843313926';
+const ALLOWED_COMMAND_CHANNELS = [ECONOMY_CHANNEL, '1265305843331497995'];
 
 // Admin user ID
 const ADMIN_USER_ID = '334000664130617345';
@@ -279,8 +280,8 @@ client.on('messageCreate', async (message) => {
 
   // Check coins command
   if (message.content.toLowerCase() === '!coins') {
-    // Check if in economy channel
-    if (message.channel.id !== ECONOMY_CHANNEL) return;
+    // Check if in allowed channels
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
     
     const userId = message.author.id;
     
@@ -297,8 +298,8 @@ client.on('messageCreate', async (message) => {
 
   // Check gambit command (buy VIP role)
   if (message.content.toLowerCase() === '!gambit') {
-    // Check if in economy channel
-    if (message.channel.id !== ECONOMY_CHANNEL) return;
+    // Check if in allowed channels
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
     
     const userId = message.author.id;
     
@@ -355,8 +356,8 @@ client.on('messageCreate', async (message) => {
 
   // Check givecoin command (admin only)
   if (message.content.toLowerCase().startsWith('!givecoin')) {
-    // Check if in economy channel
-    if (message.channel.id !== ECONOMY_CHANNEL) return;
+    // Check if in allowed channels
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
     
     // Check if user is admin
     if (message.author.id !== ADMIN_USER_ID) return;
