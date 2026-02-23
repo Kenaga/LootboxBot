@@ -716,6 +716,39 @@ client.on('messageCreate', async (message) => {
     
     message.reply(replyText);
   }
+
+  // Leaderboard command (admin only)
+  if (message.content.toLowerCase() === '!leaderboard') {
+    // Check if in allowed channels
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+
+    // Admin only
+    if (message.author.id !== ADMIN_USER_ID) return;
+
+    // Fetch top 5 users by coins from database
+    const topUsers = await User.find().sort({ coins: -1 }).limit(5);
+
+    if (topUsers.length === 0) {
+      message.reply(`No users found on the leaderboard yet!`);
+      return;
+    }
+
+    let leaderboardText = `🏆 **LEADERBOARD — Top 5**\n\n`;
+
+    for (let i = 0; i < topUsers.length; i++) {
+      let username = `Unknown User`;
+      try {
+        const member = await message.guild.members.fetch(topUsers[i].userId);
+        username = member.displayName;
+      } catch {
+        // User might have left the server
+      }
+      leaderboardText += `**#${i + 1} — ${username}**\n`;
+      leaderboardText += `🪙 Coins: **${topUsers[i].coins}**\n\n`;
+    }
+
+    message.reply(leaderboardText);
+  }
 });
 
 client.on('messageUpdate', async (oldMessage, newMessage) => {
