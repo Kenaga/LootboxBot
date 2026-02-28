@@ -124,9 +124,9 @@ const lootboxItems = [
 
 // VIP lootbox items (for users with special role)
 const vipLootboxItems = [
-  { message: 'Blue 🔵', probability: 99.92 },
-  { message: 'Purple 🟣', probability: 0.06 },
-  { message: 'Gold 🟡', probability: 0.02 }
+  { message: 'Blue 🔵', probability: 99.96 },
+  { message: 'Purple 🟣', probability: 0.03 },
+  { message: 'Gold 🟡', probability: 0.01 }
 ];
 
 // VIP Role ID
