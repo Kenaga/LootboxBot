@@ -117,16 +117,16 @@ async function removeRoleExpiration(userId) {
 
 // Lootbox items with their probabilities
 const lootboxItems = [
-  { message: 'Blue 🔵', probability: 99.965 },
-  { message: 'Purple 🟣', probability: 0.025 },
-  { message: 'Gold 🟡', probability: 0.01 }
+  { message: 'Blue 🔵', probability: 99.972 },
+  { message: 'Purple 🟣', probability: 0.02 },
+  { message: 'Gold 🟡', probability: 0.008 }
 ];
 
 // VIP lootbox items (for users with special role)
 const vipLootboxItems = [
-  { message: 'Blue 🔵', probability: 99.3 },
-  { message: 'Purple 🟣', probability: 0.6 },
-  { message: 'Gold 🟡', probability: 0.1 }
+  { message: 'Blue 🔵', probability: 99.92 },
+  { message: 'Purple 🟣', probability: 0.06 },
+  { message: 'Gold 🟡', probability: 0.02 }
 ];
 
 // VIP Role ID
