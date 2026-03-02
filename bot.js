@@ -800,6 +800,17 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
         channel.send(`<@${userId}> Your **Gambit** role has been removed by an admin.`);
       }
     }
+
+    // Check if user removed their server boost
+    const wasBosting = oldMember.premiumSince !== null;
+    const isBoosting = newMember.premiumSince !== null;
+
+    if (wasBosting && !isBoosting) {
+      const boostChannel = await newMember.guild.channels.fetch('1265305805998002307');
+      if (boostChannel) {
+        boostChannel.send(`💔 **${newMember.displayName}** has removed their boost from the server.`);
+      }
+    }
   } catch (error) {
     console.error('Error handling role update:', error);
   }
