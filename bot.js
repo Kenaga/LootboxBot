@@ -766,6 +766,23 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
   }
 });
 
+// Age verification - assign role if user types a year less than 2008
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+  if (message.channel.id !== '1269762954685976647') return;
+
+  const year = parseInt(message.content.trim());
+  if (isNaN(year)) return;
+
+  if (year < 2008) {
+    try {
+      await message.member.roles.add('1265303728668414064');
+    } catch (error) {
+      console.error('Error adding age verification role:', error);
+    }
+  }
+});
+
 // Detect when Gambit role is manually removed by admin
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
   try {
