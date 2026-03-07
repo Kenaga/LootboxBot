@@ -117,16 +117,16 @@ async function removeRoleExpiration(userId) {
 
 // Lootbox items with their probabilities
 const lootboxItems = [
-  { message: 'Blue 🔵', probability: 99.972 },
-  { message: 'Purple 🟣', probability: 0.02 },
-  { message: 'Gold 🟡', probability: 0.008 }
+  { message: '<:blue:1479196105056059616>', probability: 99.972 },
+  { message: '<:purple:1479196147883966557>', probability: 0.02 },
+  { message: '<:gold:1479196123712192512>', probability: 0.008 }
 ];
 
 // VIP lootbox items (for users with special role)
 const vipLootboxItems = [
-  { message: 'Blue 🔵', probability: 99.96 },
-  { message: 'Purple 🟣', probability: 0.03 },
-  { message: 'Gold 🟡', probability: 0.01 }
+  { message: '<:blue:1479196105056059616>', probability: 99.96 },
+  { message: '<:purple:1479196147883966557>', probability: 0.03 },
+  { message: '<:gold:1479196123712192512>', probability: 0.01 }
 ];
 
 // VIP Role ID
@@ -766,13 +766,20 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
   }
 });
 
-// Age verification - assign role if user types a year less than 2008
+// Age verification - assign role if user types a valid birth year less than 2008
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
   if (message.channel.id !== '1269762954685976647') return;
 
-  const year = parseInt(message.content.trim());
-  if (isNaN(year)) return;
+  const input = message.content.trim();
+
+  // Only accept exactly 4 digit numbers
+  if (!/^\d{4}$/.test(input)) return;
+
+  const year = parseInt(input);
+
+  // Ignore years below 1900
+  if (year < 1900) return;
 
   if (year < 2008) {
     try {
@@ -822,10 +829,10 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     const wasBosting = oldMember.premiumSince !== null;
     const isBoosting = newMember.premiumSince !== null;
 
-    if (wasBosting && !isBoosting) {
+    if (wasBosting && !isBoosting && newMember.guild.id === '1265290521199509627') {
       const boostChannel = await newMember.guild.channels.fetch('1265305805998002307');
       if (boostChannel) {
-        boostChannel.send(`💔 **${newMember.displayName}** has removed their boost from the server.`);
+        boostChannel.send(`💔 <@${newMember.id}> has removed their boost from the server.`);
       }
     }
   } catch (error) {
