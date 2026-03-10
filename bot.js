@@ -117,16 +117,25 @@ async function removeRoleExpiration(userId) {
 
 // Lootbox items with their probabilities
 const lootboxItems = [
-  { message: 'Blue <:blue:1479814519994974208>', probability: 99.972 },
-  { message: 'Purple <:purple:1479814559555522745>', probability: 0.02 },
-  { message: 'Gold <:gold:1479814535220166708>', probability: 0.008 }
+  { message: 'Blue <:blue:1479814519994974208>', probability: 98.968 },
+  { message: 'jeff', probability: 1 },
+  { message: 'Purple <:purple:1479814559555522745>', probability: 0.023 },
+  { message: 'Gold <:gold:1479814535220166708>', probability: 0.009 }
 ];
 
-// VIP lootbox items (for users with special role)
+// VIP lootbox items (Gambit users - no Jeff)
 const vipLootboxItems = [
-  { message: 'Blue <:blue:1479814519994974208>', probability: 99.96 },
-  { message: 'Purple <:purple:1479814559555522745>', probability: 0.03 },
-  { message: 'Gold <:gold:1479814535220166708>', probability: 0.01 }
+  { message: 'Blue <:blue:1479814519994974208>', probability: 99.95 },
+  { message: 'Purple <:purple:1479814559555522745>', probability: 0.045 },
+  { message: 'Gold <:gold:1479814535220166708>', probability: 0.015 }
+];
+
+// Test lootbox items for admin testing
+const testLootboxItems = [
+  { message: 'Blue <:blue:1479814519994974208>', probability: 25 },
+  { message: 'jeff', probability: 25 },
+  { message: 'Purple <:purple:1479814559555522745>', probability: 25 },
+  { message: 'Gold <:gold:1479814535220166708>', probability: 25 }
 ];
 
 // VIP Role ID
@@ -291,28 +300,36 @@ async function handleLootboxCommand(message) {
 
   // Check if user has the VIP role
   const hasVipRole = message.member.roles.cache.has(VIP_ROLE_ID);
-  
-  // Get 1 random item based on whether they have VIP role
-  const item = hasVipRole ? getRandomItem(vipLootboxItems) : getRandomItem(lootboxItems);
+  const isAdmin = message.author.id === ADMIN_USER_ID;
 
-  // Award coins (1 coin for Blue only)
+  // Get 1 random item based on role (admin gets test odds)
+  let item;
+  if (isAdmin) {
+    item = getRandomItem(testLootboxItems);
+  } else if (hasVipRole) {
+    item = getRandomItem(vipLootboxItems);
+  } else {
+    item = getRandomItem(lootboxItems);
+  }
+
+  // Award coins (1 coin for Blue, 10 coins for Jeff)
   if (item.includes('Blue')) {
     const userId = message.author.id;
-    
-    // Get current coins from cache or default to 0
     const currentCoins = userCoins.get(userId) || 0;
     const newCoins = currentCoins + 1;
-    
-    // Update cache immediately
     userCoins.set(userId, newCoins);
-    
-    // Save to database asynchronously (non-blocking)
-    saveUserCoins(userId, newCoins).catch(err => 
-      console.error('Error saving coins:', err)
-    );
-    
-    // Track blue stat
+    saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
     incrementStat(userId, 'blues').catch(err => console.error('Error tracking stat:', err));
+  }
+
+  if (item === 'jeff') {
+    const userId = message.author.id;
+    const currentCoins = userCoins.get(userId) || 0;
+    const newCoins = currentCoins + 10;
+    userCoins.set(userId, newCoins);
+    saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
+    message.reply(`# <:jeffHappy:1394970332477132830>\nYou found Jeff! And he gives you 10 coins! :coin:`);
+    return;
   }
 
   if (item.includes('Purple')) {
