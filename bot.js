@@ -130,13 +130,7 @@ const vipLootboxItems = [
   { message: 'Gold <:gold:1479814535220166708>', probability: 0.015 }
 ];
 
-// Test lootbox items for admin testing
-const testLootboxItems = [
-  { message: 'Blue <:blue:1479814519994974208>', probability: 25 },
-  { message: 'jeff', probability: 25 },
-  { message: 'Purple <:purple:1479814559555522745>', probability: 25 },
-  { message: 'Gold <:gold:1479814535220166708>', probability: 25 }
-];
+// Test lootbox items for admin testing - removed after testing
 
 // VIP Role ID
 const VIP_ROLE_ID = '1472362801992306871';
@@ -300,17 +294,9 @@ async function handleLootboxCommand(message) {
 
   // Check if user has the VIP role
   const hasVipRole = message.member.roles.cache.has(VIP_ROLE_ID);
-  const isAdmin = message.author.id === ADMIN_USER_ID;
 
-  // Get 1 random item based on role (admin gets test odds)
-  let item;
-  if (isAdmin) {
-    item = getRandomItem(testLootboxItems);
-  } else if (hasVipRole) {
-    item = getRandomItem(vipLootboxItems);
-  } else {
-    item = getRandomItem(lootboxItems);
-  }
+  // Get 1 random item based on role
+  const item = hasVipRole ? getRandomItem(vipLootboxItems) : getRandomItem(lootboxItems);
 
   // Award coins (1 coin for Blue, 10 coins for Jeff)
   if (item.includes('Blue')) {
