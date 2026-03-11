@@ -776,20 +776,28 @@ client.on('messageCreate', async (message) => {
 
   const input = message.content.trim();
 
-  // Only accept exactly 4 digit numbers
-  if (!/^\d{4}$/.test(input)) return;
+  // If not exactly 4 digits, prompt the user
+  if (!/^\d{4}$/.test(input)) {
+    message.channel.send(`${message.author} Please **only** write your **birth year**`);
+    return;
+  }
 
   const year = parseInt(input);
 
-  // Ignore years below 1900
-  if (year < 1900) return;
+  // If year is less than 1926, it's not a valid year
+  if (year < 1926) {
+    message.channel.send(`${message.author} Please enter a valid year.`);
+    return;
+  }
 
-  if (year < 2008) {
-    try {
-      await message.member.roles.add('1265303728668414064');
-    } catch (error) {
-      console.error('Error adding age verification role:', error);
-    }
+  // If year is 2008 or higher, user is under 18 - silently ignore
+  if (year >= 2008) return;
+
+  // Valid year between 1926-2007, give role
+  try {
+    await message.member.roles.add('1265303728668414064');
+  } catch (error) {
+    console.error('Error adding age verification role:', error);
   }
 });
 
