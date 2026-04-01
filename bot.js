@@ -115,19 +115,33 @@ async function removeRoleExpiration(userId) {
   }
 }
 
-// Lootbox items with their probabilities
+// Lootbox items with their probabilities (Blue split into 8 languages)
 const lootboxItems = [
-  { message: 'Blue\nMavi\nBlau\nBleu\nBlu\nAzul\nAzul\nСиний <:blue:1479814519994974208>', probability: 98.968 },
-  { message: 'jeff', probability: 1 },
-  { message: 'Purple <:purple:1479814559555522745>', probability: 0.023 },
-  { message: 'Gold <:gold:1479814535220166708>', probability: 0.009 }
+  { message: 'Blue <:blue:1479814519994974208>', type: 'blue', probability: 12.371 },
+  { message: 'Mavi <:blue:1479814519994974208>', type: 'blue', probability: 12.371 },
+  { message: 'Blau <:blue:1479814519994974208>', type: 'blue', probability: 12.371 },
+  { message: 'Bleu <:blue:1479814519994974208>', type: 'blue', probability: 12.371 },
+  { message: 'Blu <:blue:1479814519994974208>', type: 'blue', probability: 12.371 },
+  { message: 'Azul <:blue:1479814519994974208>', type: 'blue', probability: 12.371 },
+  { message: 'Azul <:blue:1479814519994974208>', type: 'blue', probability: 12.371 },
+  { message: 'Синий <:blue:1479814519994974208>', type: 'blue', probability: 12.371 },
+  { message: 'jeff', type: 'jeff', probability: 1 },
+  { message: 'Purple <:purple:1479814559555522745>', type: 'purple', probability: 0.023 },
+  { message: 'Gold <:gold:1479814535220166708>', type: 'gold', probability: 0.009 }
 ];
 
-// VIP lootbox items (Gambit users - no Jeff)
+// VIP lootbox items (Gambit users - no Jeff, Blue split into 8 languages)
 const vipLootboxItems = [
-  { message: 'Blue\nMavi\nBlau\nBleu\nBlu\nAzul\nAzul\nСиний <:blue:1479814519994974208>', probability: 99.95 },
-  { message: 'Purple <:purple:1479814559555522745>', probability: 0.045 },
-  { message: 'Gold <:gold:1479814535220166708>', probability: 0.015 }
+  { message: 'Blue <:blue:1479814519994974208>', type: 'blue', probability: 12.49375 },
+  { message: 'Mavi <:blue:1479814519994974208>', type: 'blue', probability: 12.49375 },
+  { message: 'Blau <:blue:1479814519994974208>', type: 'blue', probability: 12.49375 },
+  { message: 'Bleu <:blue:1479814519994974208>', type: 'blue', probability: 12.49375 },
+  { message: 'Blu <:blue:1479814519994974208>', type: 'blue', probability: 12.49375 },
+  { message: 'Azul <:blue:1479814519994974208>', type: 'blue', probability: 12.49375 },
+  { message: 'Azul <:blue:1479814519994974208>', type: 'blue', probability: 12.49375 },
+  { message: 'Синий <:blue:1479814519994974208>', type: 'blue', probability: 12.49375 },
+  { message: 'Purple <:purple:1479814559555522745>', type: 'purple', probability: 0.045 },
+  { message: 'Gold <:gold:1479814535220166708>', type: 'gold', probability: 0.015 }
 ];
 
 // Test lootbox items for admin testing - removed after testing
@@ -264,18 +278,18 @@ async function removeUserRole(userId, guildId) {
 
 // Function to get a random item based on weighted probabilities
 function getRandomItem(itemsArray) {
-  const random = Math.random() * 100; // Random number between 0 and 100
+  const random = Math.random() * 100;
   let cumulativeProbability = 0;
 
   for (const item of itemsArray) {
     cumulativeProbability += item.probability;
     if (random <= cumulativeProbability) {
-      return item.message;
+      return item;
     }
   }
 
   // Fallback (should never reach here)
-  return itemsArray[0].message;
+  return itemsArray[0];
 }
 
 // Function to handle lootbox command
@@ -299,7 +313,7 @@ async function handleLootboxCommand(message) {
   const item = hasVipRole ? getRandomItem(vipLootboxItems) : getRandomItem(lootboxItems);
 
   // Award coins (1 coin for Blue, 10 coins for Jeff)
-  if (item.includes('Blue')) {
+  if (item.type === 'blue') {
     const userId = message.author.id;
     const currentCoins = userCoins.get(userId) || 0;
     const newCoins = currentCoins + 1;
@@ -308,7 +322,7 @@ async function handleLootboxCommand(message) {
     incrementStat(userId, 'blues').catch(err => console.error('Error tracking stat:', err));
   }
 
-  if (item === 'jeff') {
+  if (item.type === 'jeff') {
     const userId = message.author.id;
     const currentCoins = userCoins.get(userId) || 0;
     const newCoins = currentCoins + 10;
@@ -318,19 +332,19 @@ async function handleLootboxCommand(message) {
     return;
   }
 
-  if (item.includes('Purple')) {
+  if (item.type === 'purple') {
     incrementStat(message.author.id, 'purples').catch(err => console.error('Error tracking stat:', err));
   }
 
-  if (item.includes('Gold')) {
+  if (item.type === 'gold') {
     incrementStat(message.author.id, 'golds').catch(err => console.error('Error tracking stat:', err));
   }
 
-  // Check if it's a rare item (Purple or Gold) and ping both the user and the owner
-  if (item.includes('Purple') || item.includes('Gold')) {
-    message.reply(`${message.author} <@334000664130617345> ${item}`);
+  // Ping user and owner for rare items
+  if (item.type === 'purple' || item.type === 'gold') {
+    message.reply(`${message.author} <@334000664130617345> ${item.message}`);
   } else {
-    message.reply(item);
+    message.reply(item.message);
   }
 }
 
