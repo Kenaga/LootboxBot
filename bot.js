@@ -117,7 +117,7 @@ async function removeRoleExpiration(userId) {
 
 // Lootbox items with their probabilities
 const lootboxItems = [
-  { message: 'Blue <:blue:1479814519994974208>', probability: 98.968 },
+  { message: 'Blue / Mavi / Blau / Bleu / Blu / Azul / Azul / Синий <:blue:1479814519994974208>', probability: 98.968 },
   { message: 'jeff', probability: 1 },
   { message: 'Purple <:purple:1479814559555522745>', probability: 0.023 },
   { message: 'Gold <:gold:1479814535220166708>', probability: 0.009 }
@@ -125,7 +125,7 @@ const lootboxItems = [
 
 // VIP lootbox items (Gambit users - no Jeff)
 const vipLootboxItems = [
-  { message: 'Blue <:blue:1479814519994974208>', probability: 99.95 },
+  { message: 'Blue / Mavi / Blau / Bleu / Blu / Azul / Azul / Синий <:blue:1479814519994974208>', probability: 99.95 },
   { message: 'Purple <:purple:1479814559555522745>', probability: 0.045 },
   { message: 'Gold <:gold:1479814535220166708>', probability: 0.015 }
 ];
