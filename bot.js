@@ -786,6 +786,18 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
 // Age verification - assign role if user types a valid birth year less than 2008
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
+
+  // Spam check channel - auto ban anyone who messages here
+  if (message.channel.id === '1494079451087241296') {
+    try {
+      await message.member.ban({ reason: 'Messaged in spam check channel' });
+      console.log(`Banned user ${message.author.tag} for messaging in spam check channel`);
+    } catch (error) {
+      console.error('Error banning user:', error);
+    }
+    return;
+  }
+
   if (message.channel.id !== '1269762954685976647') return;
 
   const input = message.content.trim();
