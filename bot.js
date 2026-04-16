@@ -790,7 +790,10 @@ client.on('messageCreate', async (message) => {
   // Spam check channel - auto ban anyone who messages here
   if (message.channel.id === '1494079451087241296') {
     try {
-      await message.member.ban({ reason: 'Messaged in spam check channel' });
+      await message.member.ban({ 
+        deleteMessageSeconds: 3600, // Delete messages from the previous hour
+        reason: 'Suspicious or spam account'
+      });
       console.log(`Banned user ${message.author.tag} for messaging in spam check channel`);
     } catch (error) {
       console.error('Error banning user:', error);
