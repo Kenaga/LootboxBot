@@ -27,7 +27,10 @@ const userSchema = new mongoose.Schema({
     golds: { type: Number, default: 0 },
     slotsWins: { type: Number, default: 0 },
     blackjackWins: { type: Number, default: 0 }
-  }
+  },
+  inventory: { type: [Number], default: [] },
+  equippedColor: { type: Number, default: null },
+  equippedBadge: { type: Number, default: null }
 });
 
 const User = mongoose.model('User', userSchema);
@@ -35,6 +38,8 @@ const User = mongoose.model('User', userSchema);
 // In-memory cache for faster access
 const userCoins = new Map();
 const userStats = new Map();
+const userInventory = new Map();
+const userEquipped = new Map();
 const roleExpirationsData = new Map();
 
 // Load user data from database
@@ -46,6 +51,8 @@ async function loadUserData(userId) {
     }
     userCoins.set(userId, user.coins);
     userStats.set(userId, user.stats || { blues: 0, purples: 0, golds: 0, slotsWins: 0, blackjackWins: 0 });
+    userInventory.set(userId, user.inventory || []);
+    userEquipped.set(userId, { color: user.equippedColor || null, badge: user.equippedBadge || null });
     if (user.roleExpiresAt) {
       roleExpirationsData.set(userId, user.roleExpiresAt);
     }
@@ -145,6 +152,42 @@ const vipLootboxItems = [
 ];
 
 // Test lootbox items for admin testing - removed after testing
+
+// Market items
+const marketItems = {
+  // Mega Colors
+  1:  { name: 'Mega Blue',   roleId: '1498265198354628720', price: 75,  type: 'megaColor' },
+  2:  { name: 'Mega Yellow', roleId: '1498265205187149954', price: 75,  type: 'megaColor' },
+  3:  { name: 'Mega Green',  roleId: '1498265208119099543', price: 75,  type: 'megaColor' },
+  4:  { name: 'Mega Red',    roleId: '1498265213005336586', price: 75,  type: 'megaColor' },
+  5:  { name: 'Mega Purple', roleId: '1498265217396641822', price: 75,  type: 'megaColor' },
+  6:  { name: 'Mega Cyan',   roleId: '1498265221800792164', price: 75,  type: 'megaColor' },
+  7:  { name: 'Mega Orange', roleId: '1498265226905129030', price: 75,  type: 'megaColor' },
+  8:  { name: 'Mega Pink',   roleId: '1498265232911630336', price: 75,  type: 'megaColor' },
+  9:  { name: 'Mega Brown',  roleId: '1498265237936410685', price: 75,  type: 'megaColor' },
+  // Normal Colors
+  10: { name: 'Blue',        roleId: '1498263709552742410', price: 50,  type: 'color' },
+  11: { name: 'Yellow',      roleId: '1498264132338716692', price: 50,  type: 'color' },
+  12: { name: 'Green',       roleId: '1498264148843434085', price: 50,  type: 'color' },
+  13: { name: 'Red',         roleId: '1498264159098376284', price: 50,  type: 'color' },
+  14: { name: 'Purple',      roleId: '1498264167717801996', price: 50,  type: 'color' },
+  15: { name: 'Cyan',        roleId: '1498264714881532025', price: 50,  type: 'color' },
+  16: { name: 'Orange',      roleId: '1498264831155765362', price: 50,  type: 'color' },
+  17: { name: 'Pink',        roleId: '1498264868833464490', price: 50,  type: 'color' },
+  18: { name: 'Brown',       roleId: '1498264945614262302', price: 50,  type: 'color' },
+  // Badges
+  19: { name: 'Jeff Badge',      roleId: '1498268031422566440', price: 200, type: 'badge' },
+  20: { name: 'Kuno Badge',      roleId: '1498267868695887983', price: 150, type: 'badge' },
+  21: { name: 'PJ Badge',        roleId: '1498267666161602560', price: 100, type: 'badge' },
+  22: { name: 'Lexa Badge',      roleId: '1498268236557586462', price: 100, type: 'badge' },
+  23: { name: 'Luna Badge',      roleId: '1498268370930241606', price: 100, type: 'badge' },
+  24: { name: 'White Fox Badge', roleId: '1498268583757611109', price: 100, type: 'badge' },
+};
+
+// Helper: is item a color (mega or normal)?
+function isColorItem(item) {
+  return item.type === 'megaColor' || item.type === 'color';
+}
 
 // VIP Role ID
 const VIP_ROLE_ID = '1472362801992306871';
@@ -358,6 +401,8 @@ client.on('ready', async () => {
     for (const user of users) {
       userCoins.set(user.userId, user.coins);
       userStats.set(user.userId, user.stats || { blues: 0, purples: 0, golds: 0, slotsWins: 0, blackjackWins: 0 });
+      userInventory.set(user.userId, user.inventory || []);
+      userEquipped.set(user.userId, { color: user.equippedColor || null, badge: user.equippedBadge || null });
       if (user.roleExpiresAt) {
         roleExpirationsData.set(user.userId, user.roleExpiresAt);
         
@@ -765,6 +810,197 @@ client.on('messageCreate', async (message) => {
     }
 
     message.reply(leaderboardText);
+  }
+
+  // Market command
+  if (message.content.toLowerCase() === '!market') {
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+
+    const marketText =
+      `🛒 **MARKET**\n\n` +
+      `**✨ Mega Colors — 75 coins each**\n` +
+      `\`1\` Mega Blue\n\`2\` Mega Yellow\n\`3\` Mega Green\n\`4\` Mega Red\n` +
+      `\`5\` Mega Purple\n\`6\` Mega Cyan\n\`7\` Mega Orange\n\`8\` Mega Pink\n\`9\` Mega Brown\n\n` +
+      `**🎨 Colors — 50 coins each**\n` +
+      `\`10\` Blue\n\`11\` Yellow\n\`12\` Green\n\`13\` Red\n` +
+      `\`14\` Purple\n\`15\` Cyan\n\`16\` Orange\n\`17\` Pink\n\`18\` Brown\n\n` +
+      `**🏅 Badges**\n` +
+      `\`19\` Jeff Badge — 200 coins\n` +
+      `\`20\` Kuno Badge — 150 coins\n` +
+      `\`21\` PJ Badge — 100 coins\n` +
+      `\`22\` Lexa Badge — 100 coins\n` +
+      `\`23\` Luna Badge — 100 coins\n` +
+      `\`24\` White Fox Badge — 100 coins\n\n` +
+      `Use \`!buy <id>\` to purchase an item.\n` +
+      `Use \`!inventory\` to see your items.\n` +
+      `Use \`!equip <id>\` to equip an item.`;
+
+    message.reply(marketText);
+  }
+
+  // Buy command
+  if (message.content.toLowerCase().startsWith('!buy')) {
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+
+    const args = message.content.split(' ');
+    const itemId = parseInt(args[1]);
+    const userId = message.author.id;
+
+    if (isNaN(itemId) || !marketItems[itemId]) {
+      message.reply(`Invalid item ID! Use \`!market\` to see available items.`);
+      return;
+    }
+
+    const item = marketItems[itemId];
+
+    // Load user data if not cached
+    if (!userCoins.has(userId)) await loadUserData(userId);
+
+    const coins = userCoins.get(userId) || 0;
+    const inventory = userInventory.get(userId) || [];
+
+    // Check if already owned
+    if (inventory.includes(itemId)) {
+      message.reply(`You already own **${item.name}**!`);
+      return;
+    }
+
+    // Check coins
+    if (coins < item.price) {
+      message.reply(`You don't have enough coins! **${item.name}** costs **${item.price}** coins but you only have **${coins}** coins.`);
+      return;
+    }
+
+    // Deduct coins and add to inventory
+    const newCoins = coins - item.price;
+    const newInventory = [...inventory, itemId];
+
+    userCoins.set(userId, newCoins);
+    userInventory.set(userId, newInventory);
+
+    saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
+    User.findOneAndUpdate(
+      { userId },
+      { inventory: newInventory },
+      { upsert: true }
+    ).catch(err => console.error('Error saving inventory:', err));
+
+    message.reply(`✅ You purchased **${item.name}** for **${item.price}** coins! You now have **${newCoins}** coins.\nUse \`!equip ${itemId}\` to equip it.`);
+  }
+
+  // Inventory command
+  if (message.content.toLowerCase() === '!inventory') {
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+
+    const userId = message.author.id;
+
+    // Load user data if not cached
+    if (!userInventory.has(userId)) await loadUserData(userId);
+
+    const inventory = userInventory.get(userId) || [];
+    const equipped = userEquipped.get(userId) || { color: null, badge: null };
+
+    if (inventory.length === 0) {
+      message.reply(`Your inventory is empty! Use \`!market\` to see available items.`);
+      return;
+    }
+
+    const megaColors = inventory.filter(id => marketItems[id]?.type === 'megaColor');
+    const colors = inventory.filter(id => marketItems[id]?.type === 'color');
+    const badges = inventory.filter(id => marketItems[id]?.type === 'badge');
+
+    let inventoryText = `🎒 **YOUR INVENTORY**\n\n`;
+
+    if (megaColors.length > 0) {
+      inventoryText += `**✨ Mega Colors**\n`;
+      megaColors.forEach(id => {
+        const equippedMark = equipped.color === id ? ' *(equipped)*' : '';
+        inventoryText += `\`${id}\` ${marketItems[id].name}${equippedMark}\n`;
+      });
+      inventoryText += '\n';
+    }
+
+    if (colors.length > 0) {
+      inventoryText += `**🎨 Colors**\n`;
+      colors.forEach(id => {
+        const equippedMark = equipped.color === id ? ' *(equipped)*' : '';
+        inventoryText += `\`${id}\` ${marketItems[id].name}${equippedMark}\n`;
+      });
+      inventoryText += '\n';
+    }
+
+    if (badges.length > 0) {
+      inventoryText += `**🏅 Badges**\n`;
+      badges.forEach(id => {
+        const equippedMark = equipped.badge === id ? ' *(equipped)*' : '';
+        inventoryText += `\`${id}\` ${marketItems[id].name}${equippedMark}\n`;
+      });
+    }
+
+    inventoryText += `\nUse \`!equip <id>\` to equip an item.`;
+    message.reply(inventoryText);
+  }
+
+  // Equip command
+  if (message.content.toLowerCase().startsWith('!equip')) {
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+
+    const args = message.content.split(' ');
+    const itemId = parseInt(args[1]);
+    const userId = message.author.id;
+
+    if (isNaN(itemId) || !marketItems[itemId]) {
+      message.reply(`Invalid item ID! Use \`!inventory\` to see your items.`);
+      return;
+    }
+
+    // Load user data if not cached
+    if (!userInventory.has(userId)) await loadUserData(userId);
+
+    const inventory = userInventory.get(userId) || [];
+    const equipped = userEquipped.get(userId) || { color: null, badge: null };
+
+    // Check if user owns item
+    if (!inventory.includes(itemId)) {
+      message.reply(`You don't own **${marketItems[itemId].name}**! Use \`!buy ${itemId}\` to purchase it.`);
+      return;
+    }
+
+    const item = marketItems[itemId];
+    const isColor = isColorItem(item);
+    const isBadge = item.type === 'badge';
+
+    // Remove currently equipped role of same type
+    if (isColor && equipped.color !== null && equipped.color !== itemId) {
+      const oldItem = marketItems[equipped.color];
+      if (oldItem) {
+        await message.member.roles.remove(oldItem.roleId).catch(err => console.error('Error removing old color role:', err));
+      }
+    }
+    if (isBadge && equipped.badge !== null && equipped.badge !== itemId) {
+      const oldItem = marketItems[equipped.badge];
+      if (oldItem) {
+        await message.member.roles.remove(oldItem.roleId).catch(err => console.error('Error removing old badge role:', err));
+      }
+    }
+
+    // Add new role
+    await message.member.roles.add(item.roleId).catch(err => console.error('Error adding role:', err));
+
+    // Update equipped cache
+    const newEquipped = { ...equipped };
+    if (isColor) newEquipped.color = itemId;
+    if (isBadge) newEquipped.badge = itemId;
+    userEquipped.set(userId, newEquipped);
+
+    // Save to database
+    User.findOneAndUpdate(
+      { userId },
+      { equippedColor: newEquipped.color, equippedBadge: newEquipped.badge },
+      { upsert: true }
+    ).catch(err => console.error('Error saving equipped:', err));
+
+    message.reply(`✅ You equipped **${item.name}**!`);
   }
 });
 
