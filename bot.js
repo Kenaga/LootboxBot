@@ -212,6 +212,9 @@ const botRemovals = new Set();
 // Track active blackjack games
 const activeBlackjackGames = new Map();
 
+// Track market command cooldowns (userId -> expiry timestamp)
+const marketCooldowns = new Map();
+
 // Blackjack deck and logic
 const CARD_SUITS = ['♠️', '♥️', '♣️', '♦️'];
 const CARD_VALUES = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
@@ -815,6 +818,29 @@ client.on('messageCreate', async (message) => {
   // Market command
   if (message.content.toLowerCase() === '!market') {
     if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+
+    const userId = message.author.id;
+    const now = Date.now();
+    const cooldownExpiry = marketCooldowns.get(userId);
+
+    // Check cooldown
+    if (cooldownExpiry && now < cooldownExpiry) {
+      const expirySeconds = Math.floor(cooldownExpiry / 1000);
+      const cooldownMsg = await message.reply(
+        `Market command was already used. Scroll up to see the market. Time left until next usage: <t:${expirySeconds}:R>`
+      );
+
+      // Delete the cooldown message when the cooldown expires
+      const timeLeft = cooldownExpiry - now;
+      setTimeout(() => {
+        cooldownMsg.delete().catch(() => {});
+      }, timeLeft);
+
+      return;
+    }
+
+    // Set 1 minute cooldown
+    marketCooldowns.set(userId, now + 60000);
 
     const marketText =
       `🛒 **MARKET**\n\n` +
