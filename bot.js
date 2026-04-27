@@ -1002,6 +1002,56 @@ client.on('messageCreate', async (message) => {
 
     message.reply(`✅ You equipped **${item.name}**!`);
   }
+
+  // Unequip command
+  if (message.content.toLowerCase().startsWith('!unequip')) {
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+
+    const args = message.content.split(' ');
+    const itemId = parseInt(args[1]);
+    const userId = message.author.id;
+
+    if (isNaN(itemId) || !marketItems[itemId]) {
+      message.reply(`Invalid item ID! Use \`!inventory\` to see your equipped items.`);
+      return;
+    }
+
+    // Load user data if not cached
+    if (!userEquipped.has(userId)) await loadUserData(userId);
+
+    const equipped = userEquipped.get(userId) || { color: null, badge: null };
+    const item = marketItems[itemId];
+    const isColor = isColorItem(item);
+    const isBadge = item.type === 'badge';
+
+    // Check if the item is actually equipped
+    if (isColor && equipped.color !== itemId) {
+      message.reply(`**${item.name}** is not currently equipped!`);
+      return;
+    }
+    if (isBadge && equipped.badge !== itemId) {
+      message.reply(`**${item.name}** is not currently equipped!`);
+      return;
+    }
+
+    // Remove the role
+    await message.member.roles.remove(item.roleId).catch(err => console.error('Error removing role:', err));
+
+    // Update equipped cache
+    const newEquipped = { ...equipped };
+    if (isColor) newEquipped.color = null;
+    if (isBadge) newEquipped.badge = null;
+    userEquipped.set(userId, newEquipped);
+
+    // Save to database
+    User.findOneAndUpdate(
+      { userId },
+      { equippedColor: newEquipped.color, equippedBadge: newEquipped.badge },
+      { upsert: true }
+    ).catch(err => console.error('Error saving equipped:', err));
+
+    message.reply(`✅ You unequipped **${item.name}**!`);
+  }
 });
 
 client.on('messageUpdate', async (oldMessage, newMessage) => {
