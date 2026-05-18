@@ -122,6 +122,37 @@ async function removeRoleExpiration(userId) {
   }
 }
 
+// Split total coins randomly among recipients (each gets at least 1, sums exactly to total)
+function splitCoinsRandomly(total, recipientCount) {
+  if (recipientCount <= 0) return [];
+  if (recipientCount === 1) return [total];
+  if (total < recipientCount) return null;
+
+  const remainder = total - recipientCount;
+  if (remainder === 0) return Array(recipientCount).fill(1);
+
+  const cutPoints = [0];
+  for (let i = 0; i < recipientCount - 1; i++) {
+    cutPoints.push(Math.floor(Math.random() * (remainder + 1)));
+  }
+  cutPoints.push(remainder);
+  cutPoints.sort((a, b) => a - b);
+
+  const shares = [];
+  for (let i = 1; i < cutPoints.length; i++) {
+    shares.push(cutPoints[i] - cutPoints[i - 1] + 1);
+  }
+  return shares;
+}
+
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
 // Lootbox items with their probabilities (Blue split into 8 languages)
 const lootboxItems = [
   { message: 'Blue <:blue:1479814519994974208>', type: 'blue', probability: 12.371 },
@@ -550,6 +581,56 @@ client.on('messageCreate', async (message) => {
     );
     
     message.reply(`Given **${amount} coins** to ${targetUser}! They now have **${newCoins}** coins.`);
+  }
+
+  // Coingiveaway command (admin only) — split coins randomly among mentioned users
+  if (message.content.toLowerCase().startsWith('!coingiveaway')) {
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+    if (message.author.id !== ADMIN_USER_ID) return;
+
+    const args = message.content.split(/\s+/);
+    const amount = parseInt(args[1], 10);
+    const mentionedUsers = [...message.mentions.users.values()];
+
+    if (isNaN(amount) || amount <= 0 || mentionedUsers.length === 0) {
+      message.reply('Usage: `!coingiveaway <amount> @user @user ...`');
+      return;
+    }
+
+    if (amount < mentionedUsers.length) {
+      message.reply(
+        `You need at least **${mentionedUsers.length}** coins (${mentionedUsers.length} users mentioned) so everyone gets at least 1 coin.`
+      );
+      return;
+    }
+
+    const shares = shuffleArray(splitCoinsRandomly(amount, mentionedUsers.length));
+    const lines = [];
+
+    for (let i = 0; i < mentionedUsers.length; i++) {
+      const targetUser = mentionedUsers[i];
+      const share = shares[i];
+      const targetUserId = targetUser.id;
+
+      let currentCoins = userCoins.get(targetUserId);
+      if (currentCoins === undefined) {
+        await loadUserData(targetUserId);
+        currentCoins = userCoins.get(targetUserId) || 0;
+      }
+
+      const newCoins = currentCoins + share;
+      userCoins.set(targetUserId, newCoins);
+      saveUserCoins(targetUserId, newCoins).catch(err =>
+        console.error('Error saving coins:', err)
+      );
+
+      lines.push(`${targetUser} — **${share}** coins (now **${newCoins}** total)`);
+    }
+
+    message.reply(
+      `🎉 **Coin giveaway!** **${amount}** coins split randomly:\n` +
+      lines.join('\n')
+    );
   }
 
   // Blackjack command
