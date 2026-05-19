@@ -233,13 +233,12 @@ const ADMIN_USER_ID = '334000664130617345';
 
 // Train robbery
 const TRAIN_CHANNELS = ['1506260153551552512', '1265305843331497995'];
-const ARRESTED_ROLE_ID = '1506265996250452098';
 const TRAIN_DURATION_MS = 30 * 60 * 1000;
+const TRAIN_COIN_POOLS = [200, 250, 300, 350, 400, 500];
 
 const robOutcomes = [
-  { type: 'success', probability: 25 },
+  { type: 'success', probability: 30 },
   { type: 'fail', probability: 70 },
-  { type: 'arrested', probability: 5 },
 ];
 
 // Track processed messages to prevent duplicates
@@ -383,38 +382,31 @@ function getRandomItem(itemsArray) {
   return itemsArray[0];
 }
 
-async function endTrain() {
+async function endTrain(reason = 'timeout') {
   if (!activeTrain) return;
 
-  const { channelId, guildId, timeoutId, arrestedUsers } = activeTrain;
+  const { channelId, timeoutId } = activeTrain;
   if (timeoutId) clearTimeout(timeoutId);
 
-  try {
-    const guild = client.guilds.cache.get(guildId);
-    if (guild) {
-      for (const userId of arrestedUsers) {
-        const member = await guild.members.fetch(userId).catch(() => null);
-        if (member?.roles.cache.has(ARRESTED_ROLE_ID)) {
-          await member.roles.remove(ARRESTED_ROLE_ID).catch(err =>
-            console.error('Error removing arrested role:', err)
-          );
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Error removing arrested roles:', error);
-  }
-
-  try {
-    const channel = await client.channels.fetch(channelId).catch(() => null);
-    if (channel) {
-      await channel.send("The train's gone! Let's hope you got some coins!");
-    }
-  } catch (error) {
-    console.error('Error sending train end message:', error);
+  let endMessage = null;
+  if (reason === 'timeout') {
+    endMessage = '<:jeffBruh:1394970329494978653> **The train\'s gone! Let\'s hope you got some coins!**';
+  } else if (reason === 'emptied') {
+    endMessage = '<:jeffHappy:1394970332477132830> **Train is successfully robbed! You got all the coins!**';
+  } else if (reason === 'stopped') {
+    endMessage = 'The train heist was stopped by an admin.';
   }
 
   activeTrain = null;
+
+  if (!endMessage) return;
+
+  try {
+    const channel = await client.channels.fetch(channelId).catch(() => null);
+    if (channel) await channel.send(endMessage);
+  } catch (error) {
+    console.error('Error sending train end message:', error);
+  }
 }
 
 // Function to handle lootbox command
@@ -1218,19 +1210,33 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    const guildId = message.guild.id;
     const channelId = message.channel.id;
-    const arrestedUsers = new Set();
+    const trainCoins = TRAIN_COIN_POOLS[Math.floor(Math.random() * TRAIN_COIN_POOLS.length)];
 
     const timeoutId = setTimeout(() => {
-      endTrain().catch(err => console.error('Error ending train:', err));
+      endTrain('timeout').catch(err => console.error('Error ending train:', err));
     }, TRAIN_DURATION_MS);
 
-    activeTrain = { guildId, channelId, timeoutId, arrestedUsers };
+    activeTrain = { channelId, timeoutId, coinsRemaining: trainCoins };
 
     message.reply(
-      "A train just passed by the train station! It is time for a heist! Type **!rob** to try to rob the train! Be careful though, you might get arrested!"
+      `A train just passed by the train station! It is time for a heist! Type **!rob** to try to rob the train!\n\n` +
+      `This train is carrying **${trainCoins}** coins!`
     );
+  }
+
+  // Stop train command (admin only)
+  if (message.content.toLowerCase() === '!stoptrain') {
+    if (!TRAIN_CHANNELS.includes(message.channel.id)) return;
+    if (message.author.id !== ADMIN_USER_ID) return;
+
+    if (!activeTrain) {
+      message.reply('There is no active train heist to stop.');
+      return;
+    }
+
+    await endTrain('stopped');
+    message.reply('Train heist stopped.');
   }
 
   // Rob command — attempt to rob the active train
@@ -1242,49 +1248,48 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
+    if (activeTrain.coinsRemaining <= 0) {
+      message.reply('This train has already been completely robbed!');
+      return;
+    }
+
     const userId = message.author.id;
-
-    if (activeTrain.arrestedUsers.has(userId) || message.member.roles.cache.has(ARRESTED_ROLE_ID)) {
-      message.reply("You're under arrest! You can't rob this train anymore. Wait for the next one!");
-      return;
-    }
-
     const outcome = getRandomItem(robOutcomes);
-
-    if (outcome.type === 'success') {
-      const coinsWon = Math.floor(Math.random() * 10) + 1;
-
-      let currentCoins = userCoins.get(userId);
-      if (currentCoins === undefined) {
-        await loadUserData(userId);
-        currentCoins = userCoins.get(userId) || 0;
-      }
-
-      const newCoins = currentCoins + coinsWon;
-      userCoins.set(userId, newCoins);
-      saveUserCoins(userId, newCoins).catch(err =>
-        console.error('Error saving coins:', err)
-      );
-
-      message.reply(
-        `🚂 You successfully robbed the train and got **${coinsWon}** coins! You now have **${newCoins}** coins.`
-      );
-      return;
-    }
 
     if (outcome.type === 'fail') {
       message.reply('💨 Your robbery attempt failed! You got away empty-handed.');
       return;
     }
 
-    // Arrested
-    activeTrain.arrestedUsers.add(userId);
-    await message.member.roles.add(ARRESTED_ROLE_ID).catch(err =>
-      console.error('Error adding arrested role:', err)
+    const coinsWon = Math.min(
+      Math.floor(Math.random() * 10) + 1,
+      activeTrain.coinsRemaining
     );
+    activeTrain.coinsRemaining -= coinsWon;
+
+    let currentCoins = userCoins.get(userId);
+    if (currentCoins === undefined) {
+      await loadUserData(userId);
+      currentCoins = userCoins.get(userId) || 0;
+    }
+
+    const newCoins = currentCoins + coinsWon;
+    userCoins.set(userId, newCoins);
+    saveUserCoins(userId, newCoins).catch(err =>
+      console.error('Error saving coins:', err)
+    );
+
+    const trainEmpty = activeTrain.coinsRemaining <= 0;
+    const coinsLeft = activeTrain.coinsRemaining;
+
     message.reply(
-      '🚔 You got arrested! You can\'t rob this train anymore. Wait for the train to leave!'
+      `🚂 You successfully robbed the train and got **${coinsWon}** coins! You now have **${newCoins}** coins.` +
+      (trainEmpty ? '' : ` The train has **${coinsLeft}** coins left.`)
     );
+
+    if (trainEmpty) {
+      await endTrain('emptied');
+    }
   }
 });
 
