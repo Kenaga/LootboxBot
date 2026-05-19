@@ -231,6 +231,17 @@ const ALLOWED_COMMAND_CHANNELS = [ECONOMY_CHANNEL, '1265305843331497995'];
 // Admin user ID
 const ADMIN_USER_ID = '334000664130617345';
 
+// Train robbery
+const TRAIN_CHANNELS = ['1506260153551552512', '1265305843331497995'];
+const ARRESTED_ROLE_ID = '1506265996250452098';
+const TRAIN_DURATION_MS = 30 * 60 * 1000;
+
+const robOutcomes = [
+  { type: 'success', probability: 25 },
+  { type: 'fail', probability: 70 },
+  { type: 'arrested', probability: 5 },
+];
+
 // Track processed messages to prevent duplicates
 const processedMessages = new Set();
 
@@ -245,6 +256,9 @@ const activeBlackjackGames = new Map();
 
 // Track market command cooldowns (userId -> expiry timestamp)
 const marketCooldowns = new Map();
+
+// Active train heist (null when no train)
+let activeTrain = null;
 
 // Blackjack deck and logic
 const CARD_SUITS = ['♠️', '♥️', '♣️', '♦️'];
@@ -367,6 +381,40 @@ function getRandomItem(itemsArray) {
 
   // Fallback (should never reach here)
   return itemsArray[0];
+}
+
+async function endTrain() {
+  if (!activeTrain) return;
+
+  const { channelId, guildId, timeoutId, arrestedUsers } = activeTrain;
+  if (timeoutId) clearTimeout(timeoutId);
+
+  try {
+    const guild = client.guilds.cache.get(guildId);
+    if (guild) {
+      for (const userId of arrestedUsers) {
+        const member = await guild.members.fetch(userId).catch(() => null);
+        if (member?.roles.cache.has(ARRESTED_ROLE_ID)) {
+          await member.roles.remove(ARRESTED_ROLE_ID).catch(err =>
+            console.error('Error removing arrested role:', err)
+          );
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error removing arrested roles:', error);
+  }
+
+  try {
+    const channel = await client.channels.fetch(channelId).catch(() => null);
+    if (channel) {
+      await channel.send("The train's gone! Let's hope you got some coins!");
+    }
+  } catch (error) {
+    console.error('Error sending train end message:', error);
+  }
+
+  activeTrain = null;
 }
 
 // Function to handle lootbox command
@@ -1158,6 +1206,85 @@ client.on('messageCreate', async (message) => {
     ).catch(err => console.error('Error saving equipped:', err));
 
     message.reply(`✅ You unequipped **${item.name}**!`);
+  }
+
+  // Train command (admin only) — start a 30-minute train heist
+  if (message.content.toLowerCase() === '!train') {
+    if (!TRAIN_CHANNELS.includes(message.channel.id)) return;
+    if (message.author.id !== ADMIN_USER_ID) return;
+
+    if (activeTrain) {
+      message.reply('A train is already at the station! Wait for it to leave before starting another heist.');
+      return;
+    }
+
+    const guildId = message.guild.id;
+    const channelId = message.channel.id;
+    const arrestedUsers = new Set();
+
+    const timeoutId = setTimeout(() => {
+      endTrain().catch(err => console.error('Error ending train:', err));
+    }, TRAIN_DURATION_MS);
+
+    activeTrain = { guildId, channelId, timeoutId, arrestedUsers };
+
+    message.reply(
+      "A train just passed by the train station! It is time for a heist! Type **!rob** to try to rob the train! Be careful though, you might get arrested!"
+    );
+  }
+
+  // Rob command — attempt to rob the active train
+  if (message.content.toLowerCase() === '!rob') {
+    if (!TRAIN_CHANNELS.includes(message.channel.id)) return;
+
+    if (!activeTrain) {
+      message.reply("There's no train at the station right now!");
+      return;
+    }
+
+    const userId = message.author.id;
+
+    if (activeTrain.arrestedUsers.has(userId) || message.member.roles.cache.has(ARRESTED_ROLE_ID)) {
+      message.reply("You're under arrest! You can't rob this train anymore. Wait for the next one!");
+      return;
+    }
+
+    const outcome = getRandomItem(robOutcomes);
+
+    if (outcome.type === 'success') {
+      const coinsWon = Math.floor(Math.random() * 10) + 1;
+
+      let currentCoins = userCoins.get(userId);
+      if (currentCoins === undefined) {
+        await loadUserData(userId);
+        currentCoins = userCoins.get(userId) || 0;
+      }
+
+      const newCoins = currentCoins + coinsWon;
+      userCoins.set(userId, newCoins);
+      saveUserCoins(userId, newCoins).catch(err =>
+        console.error('Error saving coins:', err)
+      );
+
+      message.reply(
+        `🚂 You successfully robbed the train and got **${coinsWon}** coins! You now have **${newCoins}** coins.`
+      );
+      return;
+    }
+
+    if (outcome.type === 'fail') {
+      message.reply('💨 Your robbery attempt failed! You got away empty-handed.');
+      return;
+    }
+
+    // Arrested
+    activeTrain.arrestedUsers.add(userId);
+    await message.member.roles.add(ARRESTED_ROLE_ID).catch(err =>
+      console.error('Error adding arrested role:', err)
+    );
+    message.reply(
+      '🚔 You got arrested! You can\'t rob this train anymore. Wait for the train to leave!'
+    );
   }
 });
 
