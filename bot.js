@@ -1262,7 +1262,7 @@ client.on('messageCreate', async (message) => {
     }
 
     const coinsWon = Math.min(
-      Math.floor(Math.random() * 10) + 1,
+      Math.floor(Math.random() * 20) + 1,
       activeTrain.coinsRemaining
     );
     activeTrain.coinsRemaining -= coinsWon;
