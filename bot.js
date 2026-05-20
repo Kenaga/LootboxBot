@@ -237,8 +237,8 @@ const TRAIN_DURATION_MS = 30 * 60 * 1000;
 const TRAIN_COIN_POOLS = [200, 250, 300, 350, 400, 500];
 
 const robOutcomes = [
-  { type: 'success', probability: 30 },
-  { type: 'fail', probability: 70 },
+  { type: 'success', probability: 20 },
+  { type: 'fail', probability: 80 },
 ];
 
 // Track processed messages to prevent duplicates
@@ -1262,7 +1262,7 @@ client.on('messageCreate', async (message) => {
     }
 
     const coinsWon = Math.min(
-      Math.floor(Math.random() * 20) + 1,
+      Math.floor(Math.random() * 10) + 1,
       activeTrain.coinsRemaining
     );
     activeTrain.coinsRemaining -= coinsWon;
