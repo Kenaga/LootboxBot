@@ -213,6 +213,9 @@ const marketItems = {
   22: { name: 'Lexa Badge',      roleId: '1498268236557586462', price: 100, type: 'badge' },
   23: { name: 'Luna Badge',      roleId: '1498268370930241606', price: 100, type: 'badge' },
   24: { name: 'White Fox Badge', roleId: '1498268583757611109', price: 100, type: 'badge' },
+  25: { name: 'Kiriko Badge',    roleId: '1508924263652921534', price: 150, type: 'badge' },
+  26: { name: 'Iron Fist Badge', roleId: '1508924261090201600', price: 100, type: 'badge' },
+  27: { name: 'Holloway Badge',  roleId: '1508924255184748806', price: 500, type: 'badge' },
 };
 
 // Helper: is item a color (mega or normal)?
@@ -980,7 +983,10 @@ client.on('messageCreate', async (message) => {
       `\`21\` PJ Badge — 100 coins\n` +
       `\`22\` Lexa Badge — 100 coins\n` +
       `\`23\` Luna Badge — 100 coins\n` +
-      `\`24\` White Fox Badge — 100 coins\n\n` +
+      `\`24\` White Fox Badge — 100 coins\n` +
+      `\`25\` Kiriko Badge — 150 coins\n` +
+      `\`26\` Iron Fist Badge — 100 coins\n` +
+      `\`27\` Holloway Badge — 500 coins\n\n` +
       `Use \`!buy <id>\` to purchase an item.\n` +
       `Use \`!inventory\` to see your items.\n` +
       `Use \`!equip <id>\` to equip an item.`;
