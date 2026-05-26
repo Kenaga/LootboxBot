@@ -170,16 +170,16 @@ const lootboxItems = [
 
 // VIP lootbox items (Gambit users - no Jeff, Blue split into 8 languages)
 const vipLootboxItems = [
-  { message: 'Blue <:blue:1479814519994974208>', type: 'blue', probability: 12.49375 },
-  { message: 'Mavi <:blue:1479814519994974208>', type: 'blue', probability: 12.49375 },
-  { message: 'Blau <:blue:1479814519994974208>', type: 'blue', probability: 12.49375 },
-  { message: 'Bleu <:blue:1479814519994974208>', type: 'blue', probability: 12.49375 },
-  { message: 'Blu <:blue:1479814519994974208>', type: 'blue', probability: 12.49375 },
-  { message: 'Azul <:blue:1479814519994974208>', type: 'blue', probability: 12.49375 },
-  { message: 'Azul <:blue:1479814519994974208>', type: 'blue', probability: 12.49375 },
-  { message: 'Синий <:blue:1479814519994974208>', type: 'blue', probability: 12.49375 },
-  { message: 'Purple <:purple:1479814559555522745>', type: 'purple', probability: 0.045 },
-  { message: 'Gold <:gold:1479814535220166708>', type: 'gold', probability: 0.015 }
+  { message: 'Blue <:blue:1479814519994974208>', type: 'blue', probability: 12.4678875 },
+  { message: 'Mavi <:blue:1479814519994974208>', type: 'blue', probability: 12.4678875 },
+  { message: 'Blau <:blue:1479814519994974208>', type: 'blue', probability: 12.4678875 },
+  { message: 'Bleu <:blue:1479814519994974208>', type: 'blue', probability: 12.4678875 },
+  { message: 'Blu <:blue:1479814519994974208>', type: 'blue', probability: 12.4678875 },
+  { message: 'Azul <:blue:1479814519994974208>', type: 'blue', probability: 12.4678875 },
+  { message: 'Azul <:blue:1479814519994974208>', type: 'blue', probability: 12.4678875 },
+  { message: 'Синий <:blue:1479814519994974208>', type: 'blue', probability: 12.4678875 },
+  { message: 'Purple <:purple:1479814559555522745>', type: 'purple', probability: 0.23 },
+  { message: 'Gold <:gold:1479814535220166708>', type: 'gold', probability: 0.027 }
 ];
 
 // Test lootbox items for admin testing - removed after testing
@@ -555,13 +555,13 @@ client.on('messageCreate', async (message) => {
     }
     
     // Check if user has enough coins
-    if (coins < 40) {
-      message.reply(`You need **40 coins** to get the Gambit role. You currently have **${coins} coins**.`);
+    if (coins < 100) {
+      message.reply(`You need **100 coins** to get the Gambit role. You currently have **${coins} coins**.`);
       return;
     }
     
     // Deduct coins and give role
-    const newCoins = coins - 40;
+    const newCoins = coins - 100;
     userCoins.set(userId, newCoins);
     
     // Save to database asynchronously
@@ -571,7 +571,7 @@ client.on('messageCreate', async (message) => {
     
     message.member.roles.add(VIP_ROLE_ID)
       .then(async () => {
-        message.reply(`Congratulations! You've purchased the **Gambit** role for 40 coins! You now have **${newCoins}** coins remaining.\n\n✨ Your chances for rare items have been increased!\n\nThe role will expire in 5 days. 🎉`);
+        message.reply(`Congratulations! You've purchased the **Gambit** role for 100 coins! You now have **${newCoins}** coins remaining.\n\n✨ Your chances for rare items have been increased!\n\nThe role will expire in 5 days. 🎉`);
         
         // Set up automatic role removal after 5 days
         const fiveDays = 5 * 24 * 60 * 60 * 1000; // 5 days in milliseconds
