@@ -256,6 +256,9 @@ const activeBlackjackGames = new Map();
 // Track market command cooldowns (userId -> expiry timestamp)
 const marketCooldowns = new Map();
 
+// Track pending duel challenges: challengedUserId -> { challengerId, amount, channelId, timeoutId }
+const pendingDuels = new Map();
+
 // Active train heist (null when no train)
 let activeTrain = null;
 
@@ -1290,6 +1293,165 @@ client.on('messageCreate', async (message) => {
     if (trainEmpty) {
       await endTrain('emptied');
     }
+  }
+
+  // Duel command
+  if (message.content.toLowerCase().startsWith('!duel')) {
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+
+    const challengerId = message.author.id;
+    const args = message.content.trim().split(/\s+/);
+    const targetUser = message.mentions.users.first();
+    const amount = parseInt(args[2]);
+
+    if (!targetUser || isNaN(amount) || amount <= 0) {
+      message.reply('Usage: `!duel @user <amount>`\nExample: `!duel @John 50`');
+      return;
+    }
+
+    if (targetUser.id === challengerId) {
+      message.reply("You can't duel yourself!");
+      return;
+    }
+
+    if (targetUser.bot) {
+      message.reply("You can't duel a bot!");
+      return;
+    }
+
+    // Check if challenger already issued a pending duel
+    for (const [, duel] of pendingDuels) {
+      if (duel.challengerId === challengerId) {
+        message.reply('You already have a pending duel challenge! Wait for it to be accepted or expire.');
+        return;
+      }
+    }
+
+    // Check if target already has a pending duel
+    if (pendingDuels.has(targetUser.id)) {
+      message.reply(`${targetUser} already has a pending duel challenge!`);
+      return;
+    }
+
+    // Load and check challenger coins
+    let challengerCoins = userCoins.get(challengerId);
+    if (challengerCoins === undefined) {
+      await loadUserData(challengerId);
+      challengerCoins = userCoins.get(challengerId) || 0;
+    }
+
+    if (challengerCoins < amount) {
+      message.reply(`You don't have enough coins! You need **${amount}** coins but only have **${challengerCoins}** coins.`);
+      return;
+    }
+
+    // Load and check target coins
+    let targetCoins = userCoins.get(targetUser.id);
+    if (targetCoins === undefined) {
+      await loadUserData(targetUser.id);
+      targetCoins = userCoins.get(targetUser.id) || 0;
+    }
+
+    if (targetCoins < amount) {
+      message.reply(`${targetUser} doesn't have enough coins! They need **${amount}** coins but only have **${targetCoins}** coins.`);
+      return;
+    }
+
+    // Register the pending duel with a 60-second expiry
+    const timeoutId = setTimeout(() => {
+      if (pendingDuels.has(targetUser.id)) {
+        pendingDuels.delete(targetUser.id);
+        message.channel.send(`⏰ The duel challenge from ${message.author} to ${targetUser} has expired!`).catch(() => {});
+      }
+    }, 60000);
+
+    pendingDuels.set(targetUser.id, {
+      challengerId,
+      amount,
+      channelId: message.channel.id,
+      timeoutId
+    });
+
+    message.reply(
+      `⚔️ **DUEL CHALLENGE!**\n\n` +
+      `${message.author} has challenged ${targetUser} to a duel for **${amount}** coins! 🪙\n\n` +
+      `${targetUser}, type \`!accept\` to accept the challenge!\n` +
+      `*This challenge expires in 60 seconds.*`
+    );
+  }
+
+  // Accept command — accept a pending duel challenge
+  if (message.content.toLowerCase() === '!accept') {
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+
+    const userId = message.author.id;
+
+    if (!pendingDuels.has(userId)) {
+      message.reply("You don't have any pending duel challenges!");
+      return;
+    }
+
+    const duel = pendingDuels.get(userId);
+
+    // Must accept in the same channel the challenge was issued
+    if (duel.channelId !== message.channel.id) {
+      const channelMention = `<#${duel.channelId}>`;
+      message.reply(`You must accept the duel in ${channelMention} where it was issued!`);
+      return;
+    }
+
+    // Clear timeout and remove the pending entry
+    clearTimeout(duel.timeoutId);
+    pendingDuels.delete(userId);
+
+    const { challengerId, amount } = duel;
+
+    // Re-validate coins in case they changed since the challenge was issued
+    const challengerCoins = userCoins.get(challengerId) || 0;
+    const acceptorCoins = userCoins.get(userId) || 0;
+
+    if (challengerCoins < amount) {
+      message.reply(`❌ The duel can't start — the challenger no longer has enough coins!`);
+      return;
+    }
+    if (acceptorCoins < amount) {
+      message.reply(`❌ The duel can't start — you no longer have enough coins!`);
+      return;
+    }
+
+    const challenger = await message.guild.members.fetch(challengerId).catch(() => null);
+    const challengerMention = challenger ? challenger.toString() : `<@${challengerId}>`;
+
+    message.reply(
+      `⚔️ **DUEL ACCEPTED!**\n\n` +
+      `${challengerMention} **vs** ${message.author} — **${amount}** coins on the line! 🪙\n\n` +
+      `The duel begins in 5 seconds... ⚡`
+    );
+
+    // Resolve the duel after 5 seconds
+    setTimeout(async () => {
+      const winnerId = Math.random() < 0.5 ? challengerId : userId;
+      const loserId = winnerId === challengerId ? userId : challengerId;
+
+      const winnerCurrentCoins = userCoins.get(winnerId) || 0;
+      const loserCurrentCoins = userCoins.get(loserId) || 0;
+
+      const newWinnerCoins = winnerCurrentCoins + amount;
+      const newLoserCoins = Math.max(0, loserCurrentCoins - amount);
+
+      userCoins.set(winnerId, newWinnerCoins);
+      userCoins.set(loserId, newLoserCoins);
+
+      saveUserCoins(winnerId, newWinnerCoins).catch(err => console.error('Error saving duel winner coins:', err));
+      saveUserCoins(loserId, newLoserCoins).catch(err => console.error('Error saving duel loser coins:', err));
+
+      message.channel.send(
+        `🏆 **DUEL RESULT!**\n\n` +
+        `<@${winnerId}> wins the duel and takes **${amount}** coins from <@${loserId}>! ⚔️\n\n` +
+        `💰 <@${winnerId}> now has **${newWinnerCoins}** coins.\n` +
+        `💸 <@${loserId}> now has **${newLoserCoins}** coins.`
+      ).catch(err => console.error('Error sending duel result:', err));
+    }, 5000);
   }
 });
 
