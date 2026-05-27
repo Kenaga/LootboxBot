@@ -30,7 +30,16 @@ const userSchema = new mongoose.Schema({
   },
   inventory: { type: [Number], default: [] },
   equippedColor: { type: Number, default: null },
-  equippedBadge: { type: Number, default: null }
+  equippedBadge: { type: Number, default: null },
+  achievementStats: {
+    trainHeists:          { type: Number, default: 0 },
+    trainCoinsRobbed:     { type: Number, default: 0 },
+    blackjackWinsWithBet: { type: Number, default: 0 },
+    duelsChallenged:      { type: Number, default: 0 },
+    duelsWon:             { type: Number, default: 0 },
+    jeffFinds:            { type: Number, default: 0 },
+  },
+  unlockedAchievements: { type: [String], default: [] }
 });
 
 const User = mongoose.model('User', userSchema);
@@ -41,6 +50,8 @@ const userStats = new Map();
 const userInventory = new Map();
 const userEquipped = new Map();
 const roleExpirationsData = new Map();
+const userAchievementStats = new Map();
+const userUnlockedAchievements = new Map();
 
 // Load user data from database
 async function loadUserData(userId) {
@@ -53,6 +64,8 @@ async function loadUserData(userId) {
     userStats.set(userId, user.stats || { blues: 0, purples: 0, golds: 0, slotsWins: 0, blackjackWins: 0 });
     userInventory.set(userId, user.inventory || []);
     userEquipped.set(userId, { color: user.equippedColor || null, badge: user.equippedBadge || null });
+    userAchievementStats.set(userId, user.achievementStats || { trainHeists: 0, trainCoinsRobbed: 0, blackjackWinsWithBet: 0, duelsChallenged: 0, duelsWon: 0, jeffFinds: 0 });
+    userUnlockedAchievements.set(userId, user.unlockedAchievements || []);
     if (user.roleExpiresAt) {
       roleExpirationsData.set(userId, user.roleExpiresAt);
     }
@@ -233,6 +246,139 @@ const ALLOWED_COMMAND_CHANNELS = [ECONOMY_CHANNEL, '1265305843331497995'];
 
 // Admin user ID
 const ADMIN_USER_ID = '334000664130617345';
+
+// Achievement system
+const ACHIEVEMENT_ANNOUNCE_CHANNEL = '1509170799133589704';
+const ACHIEVEMENTS_COMMAND_CHANNELS = ['1474179171843313926', '1265305843331497995'];
+
+const ACHIEVEMENTS = [
+  { id: 'blue1',        name: 'Blue!',                    description: 'Get 20 blues in lootbox game.',                   type: 'stat',      field: 'blues',                threshold: 20    },
+  { id: 'blue2',        name: 'Blue Blue!',               description: 'Get 50 blues in lootbox game.',                   type: 'stat',      field: 'blues',                threshold: 50    },
+  { id: 'blue3',        name: 'Blue Blue Blue!',          description: 'Get 100 blues in lootbox game.',                  type: 'stat',      field: 'blues',                threshold: 100   },
+  { id: 'blue4',        name: 'Blue Blue Blue BLUE!',     description: 'Get 1000 blues in lootbox game.',                 type: 'stat',      field: 'blues',                threshold: 1000  },
+  { id: 'megaColorful', name: 'Mega Colorful',            description: 'Have all the mega colors.',                       type: 'inventory', itemType: 'megaColor',         threshold: 9     },
+  { id: 'colorful',     name: 'Colorful',                 description: 'Have all the colors.',                            type: 'inventory', itemType: 'color',             threshold: 9     },
+  { id: 'scout',        name: 'Scout',                    description: 'Have all the badges.',                            type: 'inventory', itemType: 'badge',             threshold: 10    },
+  { id: 'train1',       name: 'This Is The One',          description: 'Participate in 10 train heists.',                 type: 'achStat',   field: 'trainHeists',          threshold: 10    },
+  { id: 'train2',       name: 'One More Train',           description: 'Participate in 20 train heists.',                 type: 'achStat',   field: 'trainHeists',          threshold: 20    },
+  { id: 'train3',       name: 'I Have A Plan',            description: 'Participate in 50 train heists.',                 type: 'achStat',   field: 'trainHeists',          threshold: 50    },
+  { id: 'trainCoins1',  name: 'The Conductor Hates You',  description: 'Rob 1000 coins from trains.',                     type: 'achStat',   field: 'trainCoinsRobbed',     threshold: 1000  },
+  { id: 'trainCoins2',  name: 'Never Enough',             description: 'Rob 5000 coins from trains.',                     type: 'achStat',   field: 'trainCoinsRobbed',     threshold: 5000  },
+  { id: 'trainCoins3',  name: 'Tahiti, Here We Come',     description: 'Rob 10000 coins from trains.',                    type: 'achStat',   field: 'trainCoinsRobbed',     threshold: 10000 },
+  { id: 'bj1',          name: 'I Know My Cards',          description: 'Win 50 Blackjack games with 5 or more coins.',    type: 'achStat',   field: 'blackjackWinsWithBet', threshold: 50    },
+  { id: 'bj2',          name: 'Gambler',                  description: 'Win 500 Blackjack games with 5 or more coins.',   type: 'achStat',   field: 'blackjackWinsWithBet', threshold: 500   },
+  { id: 'duel1',        name: 'Duelist',                  description: 'Duel against 10 people with 10 or more coins.',   type: 'achStat',   field: 'duelsChallenged',      threshold: 10    },
+  { id: 'duel2',        name: 'The Duelist',              description: 'Duel against 100 people with 10 or more coins.',  type: 'achStat',   field: 'duelsChallenged',      threshold: 100   },
+  { id: 'duelWin',      name: "It's High Noon",           description: 'Win 50 duels.',                                   type: 'achStat',   field: 'duelsWon',             threshold: 50    },
+  { id: 'jeff1',        name: 'Oh, Here You Are',         description: 'Find Jeff 100 times.',                            type: 'achStat',   field: 'jeffFinds',            threshold: 100   },
+  { id: 'jeff2',        name: 'NOM NOM NOM!',             description: 'Find Jeff 500 times.',                            type: 'achStat',   field: 'jeffFinds',            threshold: 500   },
+];
+
+// Increment an achievement-specific stat for a user
+async function incrementAchievementStat(userId, statName, amount = 1) {
+  try {
+    const achStats = userAchievementStats.get(userId) || { trainHeists: 0, trainCoinsRobbed: 0, blackjackWinsWithBet: 0, duelsChallenged: 0, duelsWon: 0, jeffFinds: 0 };
+    achStats[statName] = (achStats[statName] || 0) + amount;
+    userAchievementStats.set(userId, achStats);
+    await User.findOneAndUpdate(
+      { userId },
+      { $inc: { [`achievementStats.${statName}`]: amount } },
+      { upsert: true }
+    );
+  } catch (error) {
+    console.error('Error incrementing achievement stat:', error);
+  }
+}
+
+// Check all achievements and announce any newly unlocked ones
+async function checkAndAwardAchievements(userId) {
+  try {
+    const stats    = userStats.get(userId)             || {};
+    const achStats = userAchievementStats.get(userId)  || {};
+    const inventory = userInventory.get(userId)        || [];
+    const unlocked  = userUnlockedAchievements.get(userId) || [];
+
+    const newlyUnlocked = [];
+
+    for (const ach of ACHIEVEMENTS) {
+      if (unlocked.includes(ach.id)) continue;
+
+      let progress = 0;
+      if (ach.type === 'stat')      progress = stats[ach.field] || 0;
+      else if (ach.type === 'achStat')   progress = achStats[ach.field] || 0;
+      else if (ach.type === 'inventory') progress = inventory.filter(id => marketItems[id]?.type === ach.itemType).length;
+
+      if (progress >= ach.threshold) newlyUnlocked.push(ach);
+    }
+
+    if (newlyUnlocked.length === 0) return;
+
+    const newUnlockedList = [...unlocked, ...newlyUnlocked.map(a => a.id)];
+    userUnlockedAchievements.set(userId, newUnlockedList);
+
+    await User.findOneAndUpdate(
+      { userId },
+      { unlockedAchievements: newUnlockedList },
+      { upsert: true }
+    );
+
+    const announceChannel = await client.channels.fetch(ACHIEVEMENT_ANNOUNCE_CHANNEL).catch(() => null);
+    if (!announceChannel) return;
+
+    for (const ach of newlyUnlocked) {
+      await announceChannel.send(`🏆 <@${userId}> just unlocked **${ach.name}**! 🎉\n> ${ach.description}`);
+    }
+  } catch (error) {
+    console.error('Error checking/awarding achievements:', error);
+  }
+}
+
+// Build a formatted achievement progress string for !achievements
+function getAchievementProgress(userId) {
+  const stats     = userStats.get(userId)             || {};
+  const achStats  = userAchievementStats.get(userId)  || {};
+  const inventory = userInventory.get(userId)         || [];
+  const unlocked  = userUnlockedAchievements.get(userId) || [];
+
+  function getProgress(ach) {
+    if (ach.type === 'stat')      return stats[ach.field] || 0;
+    if (ach.type === 'achStat')   return achStats[ach.field] || 0;
+    if (ach.type === 'inventory') return inventory.filter(id => marketItems[id]?.type === ach.itemType).length;
+    return 0;
+  }
+
+  const byId = {};
+  for (const ach of ACHIEVEMENTS) {
+    const progress = getProgress(ach);
+    const done = unlocked.includes(ach.id) || progress >= ach.threshold;
+    byId[ach.id] = { ach, progress, done };
+  }
+
+  const categories = [
+    { label: '🔵 Blues',        ids: ['blue1', 'blue2', 'blue3', 'blue4'] },
+    { label: '🛒 Market',       ids: ['megaColorful', 'colorful', 'scout'] },
+    { label: '🚂 Train Heists', ids: ['train1', 'train2', 'train3', 'trainCoins1', 'trainCoins2', 'trainCoins3'] },
+    { label: '🃏 Blackjack',    ids: ['bj1', 'bj2'] },
+    { label: '⚔️ Duels',        ids: ['duel1', 'duel2', 'duelWin'] },
+    { label: '👴 Jeff',         ids: ['jeff1', 'jeff2'] },
+  ];
+
+  let text = `🏆 **YOUR ACHIEVEMENTS**\n\n`;
+  for (const cat of categories) {
+    text += `**${cat.label}**\n`;
+    for (const id of cat.ids) {
+      const { ach, progress, done } = byId[id];
+      if (done) {
+        text += `✅ **${ach.name}** — ${ach.description}\n`;
+      } else {
+        text += `🔒 **${ach.name}** — (${Math.min(progress, ach.threshold)}/${ach.threshold})\n`;
+      }
+    }
+    text += '\n';
+  }
+
+  return text.trimEnd();
+}
 
 // Train robbery
 const TRAIN_CHANNELS = ['1506260153551552512', '1265305843331497995'];
@@ -443,6 +589,7 @@ async function handleLootboxCommand(message) {
     userCoins.set(userId, newCoins);
     saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
     incrementStat(userId, 'blues').catch(err => console.error('Error tracking stat:', err));
+    checkAndAwardAchievements(userId).catch(err => console.error('Error checking achievements:', err));
   }
 
   if (item.type === 'jeff') {
@@ -451,6 +598,8 @@ async function handleLootboxCommand(message) {
     const newCoins = currentCoins + 10;
     userCoins.set(userId, newCoins);
     saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
+    incrementAchievementStat(userId, 'jeffFinds').catch(err => console.error('Error tracking jeff find:', err));
+    checkAndAwardAchievements(userId).catch(err => console.error('Error checking achievements:', err));
     message.reply(`# <:jeffHappy:1394970332477132830>\nYou found Jeff! And he gives you 10 coins! :coin:`);
     return;
   }
@@ -483,6 +632,8 @@ client.on('ready', async () => {
       userStats.set(user.userId, user.stats || { blues: 0, purples: 0, golds: 0, slotsWins: 0, blackjackWins: 0 });
       userInventory.set(user.userId, user.inventory || []);
       userEquipped.set(user.userId, { color: user.equippedColor || null, badge: user.equippedBadge || null });
+      userAchievementStats.set(user.userId, user.achievementStats || { trainHeists: 0, trainCoinsRobbed: 0, blackjackWinsWithBet: 0, duelsChallenged: 0, duelsWon: 0, jeffFinds: 0 });
+      userUnlockedAchievements.set(user.userId, user.unlockedAchievements || []);
       if (user.roleExpiresAt) {
         roleExpirationsData.set(user.userId, user.roleExpiresAt);
         
@@ -737,6 +888,10 @@ client.on('messageCreate', async (message) => {
       userCoins.set(userId, newCoins);
       saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
       incrementStat(userId, 'blackjackWins').catch(err => console.error('Error tracking stat:', err));
+      if (bet >= 5) {
+        incrementAchievementStat(userId, 'blackjackWinsWithBet').catch(err => console.error('Error tracking bj stat:', err));
+      }
+      checkAndAwardAchievements(userId).catch(err => console.error('Error checking achievements:', err));
       
       message.reply(
         `🃏 **BLACKJACK!** 🎉\n\n` +
@@ -876,7 +1031,15 @@ client.on('messageCreate', async (message) => {
       result = '**Push!** It\'s a tie! 🤝';
       coinsChange = 0;
     }
-    
+
+    // Achievement tracking for blackjack wins
+    if (coinsChange > 0 && game.bet >= 5) {
+      incrementAchievementStat(userId, 'blackjackWinsWithBet').catch(err => console.error('Error tracking bj stat:', err));
+    }
+    if (coinsChange > 0) {
+      checkAndAwardAchievements(userId).catch(err => console.error('Error checking achievements:', err));
+    }
+
     const newCoins = Math.max(0, game.startCoins + coinsChange);
     userCoins.set(userId, newCoins);
     saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins:', err));
@@ -1040,6 +1203,8 @@ client.on('messageCreate', async (message) => {
       { inventory: newInventory },
       { upsert: true }
     ).catch(err => console.error('Error saving inventory:', err));
+
+    checkAndAwardAchievements(userId).catch(err => console.error('Error checking achievements:', err));
 
     message.reply(`✅ You purchased **${item.name}** for **${item.price}** coins! You now have **${newCoins}** coins.\nUse \`!equip ${itemId}\` to equip it.`);
   }
@@ -1226,7 +1391,7 @@ client.on('messageCreate', async (message) => {
       endTrain('timeout').catch(err => console.error('Error ending train:', err));
     }, TRAIN_DURATION_MS);
 
-    activeTrain = { channelId, timeoutId, coinsRemaining: trainCoins };
+    activeTrain = { channelId, timeoutId, coinsRemaining: trainCoins, robbers: new Set() };
 
     message.reply(
       `A train just passed by the train station! It is time for a heist! Type **!rob** to try to rob the train!\n\n` +
@@ -1287,6 +1452,14 @@ client.on('messageCreate', async (message) => {
     saveUserCoins(userId, newCoins).catch(err =>
       console.error('Error saving coins:', err)
     );
+
+    // Achievement tracking for train robbery
+    if (!activeTrain.robbers.has(userId)) {
+      activeTrain.robbers.add(userId);
+      incrementAchievementStat(userId, 'trainHeists').catch(err => console.error('Error tracking train heist:', err));
+    }
+    incrementAchievementStat(userId, 'trainCoinsRobbed', coinsWon).catch(err => console.error('Error tracking train coins:', err));
+    checkAndAwardAchievements(userId).catch(err => console.error('Error checking achievements:', err));
 
     const trainEmpty = activeTrain.coinsRemaining <= 0;
     const coinsLeft = activeTrain.coinsRemaining;
@@ -1451,6 +1624,14 @@ client.on('messageCreate', async (message) => {
       saveUserCoins(winnerId, newWinnerCoins).catch(err => console.error('Error saving duel winner coins:', err));
       saveUserCoins(loserId, newLoserCoins).catch(err => console.error('Error saving duel loser coins:', err));
 
+      // Achievement tracking for duels
+      if (amount >= 10) {
+        incrementAchievementStat(challengerId, 'duelsChallenged').catch(err => console.error('Error tracking duel challenged:', err));
+      }
+      incrementAchievementStat(winnerId, 'duelsWon').catch(err => console.error('Error tracking duel win:', err));
+      checkAndAwardAchievements(challengerId).catch(err => console.error('Error checking achievements:', err));
+      checkAndAwardAchievements(winnerId).catch(err => console.error('Error checking achievements:', err));
+
       message.channel.send(
         `🏆 **DUEL RESULT!**\n\n` +
         `<@${winnerId}> wins the duel and takes **${amount}** coins from <@${loserId}>! ⚔️\n\n` +
@@ -1458,6 +1639,17 @@ client.on('messageCreate', async (message) => {
         `💸 <@${loserId}> now has **${newLoserCoins}** coins.`
       ).catch(err => console.error('Error sending duel result:', err));
     }, 5000);
+  }
+
+  // Achievements command
+  if (message.content.toLowerCase() === '!achievements') {
+    if (!ACHIEVEMENTS_COMMAND_CHANNELS.includes(message.channel.id)) return;
+
+    const userId = message.author.id;
+    if (!userAchievementStats.has(userId)) await loadUserData(userId);
+
+    const text = getAchievementProgress(userId);
+    message.reply(text);
   }
 });
 
