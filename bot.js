@@ -1651,6 +1651,45 @@ client.on('messageCreate', async (message) => {
     const text = getAchievementProgress(userId);
     message.reply(text);
   }
+
+  // Reset blues command (admin only) — one-time use to restart all blue counts
+  // Market/inventory achievements are preserved; only blue stats + blue achievements are cleared.
+  if (message.content.toLowerCase() === '!resetblues') {
+    if (message.author.id !== ADMIN_USER_ID) return;
+
+    try {
+      const BLUE_ACHIEVEMENT_IDS = ['blue1', 'blue2', 'blue3', 'blue4'];
+
+      // 1. Reset stats.blues to 0 for every user in the database
+      await User.updateMany({}, { $set: { 'stats.blues': 0 } });
+
+      // 2. Pull blue achievement IDs out of every user's unlockedAchievements array
+      await User.updateMany(
+        {},
+        { $pull: { unlockedAchievements: { $in: BLUE_ACHIEVEMENT_IDS } } }
+      );
+
+      // 3. Sync the in-memory cache so live data matches the DB
+      for (const [uid, stats] of userStats) {
+        stats.blues = 0;
+        userStats.set(uid, stats);
+      }
+      for (const [uid, unlocked] of userUnlockedAchievements) {
+        const filtered = unlocked.filter(id => !BLUE_ACHIEVEMENT_IDS.includes(id));
+        userUnlockedAchievements.set(uid, filtered);
+      }
+
+      message.reply(
+        `✅ **Blues reset complete!**\n` +
+        `All users' blue counts have been set to **0** and blue achievements have been cleared.\n` +
+        `Market/inventory achievements are untouched. Blues now count from this moment forward.`
+      );
+      console.log(`[ADMIN] Blues reset executed by ${message.author.tag}`);
+    } catch (err) {
+      console.error('Error resetting blues:', err);
+      message.reply('❌ An error occurred while resetting blues. Check the console.');
+    }
+  }
 });
 
 client.on('messageUpdate', async (oldMessage, newMessage) => {
