@@ -377,6 +377,8 @@ function getAchievementProgress(userId) {
     text += '\n';
   }
 
+  text += `\nIf you'd like to check more information about the achievements, [click](https://discord.com/channels/1265290521199509627/1269220844148883518/1509320371004899421) here.`;
+
   return text.trimEnd();
 }
 
