@@ -360,7 +360,7 @@ function getAchievementProgress(userId) {
     { label: '🚂 Train Heists', ids: ['train1', 'train2', 'train3', 'trainCoins1', 'trainCoins2', 'trainCoins3'] },
     { label: '🃏 Blackjack',    ids: ['bj1', 'bj2'] },
     { label: '⚔️ Duels',        ids: ['duel1', 'duel2', 'duelWin'] },
-    { label: '👴 Jeff',         ids: ['jeff1', 'jeff2'] },
+    { label: '<:jeffYay:1394970335178129461> Jeff',         ids: ['jeff1', 'jeff2'] },
   ];
 
   let text = `🏆 **YOUR ACHIEVEMENTS**\n\n`;
