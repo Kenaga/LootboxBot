@@ -1152,7 +1152,8 @@ client.on('messageCreate', async (message) => {
       `\`24\` White Fox Badge — 100 coins\n` +
       `\`25\` Kiriko Badge — 150 coins\n` +
       `\`26\` Iron Fist Badge — 100 coins\n` +
-      `\`27\` Holloway Badge — 500 coins\n\n` +
+      `\`27\` Holloway Badge — 500 coins\n` +
+      `\`28\` Mt Lady Badge — 1000 coins\n\n` +
       `Use \`!buy <id>\` to purchase an item.\n` +
       `Use \`!inventory\` to see your items.\n` +
       `Use \`!equip <id>\` to equip an item.`;
