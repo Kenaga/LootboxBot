@@ -228,7 +228,8 @@ const marketItems = {
   24: { name: 'White Fox Badge', roleId: '1498268583757611109', price: 100, type: 'badge' },
   25: { name: 'Kiriko Badge',    roleId: '1508924263652921534', price: 150, type: 'badge' },
   26: { name: 'Iron Fist Badge', roleId: '1508924261090201600', price: 100, type: 'badge' },
-  27: { name: 'Holloway Badge',  roleId: '1508924255184748806', price: 500, type: 'badge' },
+  27: { name: 'Holloway Badge',  roleId: '1508924255184748806', price: 500,  type: 'badge' },
+  28: { name: 'Mt Lady Badge',   roleId: '1511652973728501770', price: 1000, type: 'badge' },
 };
 
 // Helper: is item a color (mega or normal)?
