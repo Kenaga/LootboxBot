@@ -51,6 +51,16 @@ const winnerRecordSchema = new mongoose.Schema({
 });
 const WinnerRecord = mongoose.model('WinnerRecord', winnerRecordSchema);
 
+// Bounty schema
+const bountySchema = new mongoose.Schema({
+  bountyId:  { type: String, required: true, unique: true },
+  name:      { type: String, required: true },
+  cost:      { type: Number, required: true },
+  type:      { type: String, enum: ['deadoralive', 'alive'], required: true },
+  createdAt: { type: Number, default: () => Date.now() },
+});
+const Bounty = mongoose.model('Bounty', bountySchema);
+
 // In-memory cache for faster access
 const userCoins = new Map();
 const userStats = new Map();
@@ -382,7 +392,85 @@ function startWinnerExpiryPoller(guildId) {
   console.log('[Winner] Expiry poller started (checks every hour).');
 }
 
+// ============================================================
+// BOUNTY HUNTER SYSTEM
+// ============================================================
+
+const ADDBOUNTY_CHANNEL = '1265305843331497995'; // admin-only channel for !addbounty
+const BOUNTY_COOLDOWN_MS = 6 * 60 * 60 * 1000;  // 6 hours
+
+// In-memory bounty state
+const activeBountyHunters = new Map(); // userId   -> { bountyId, stage, channelId }
+const bountiesBeingHunted = new Map(); // bountyId -> Set<userId>
+const bountyCooldowns     = new Map(); // userId   -> expiresAt timestamp
+
+// Quotes
+const QUOTES_SUCCESS_ALIVE = [
+  '\u2705 \uD83D\uDE07 You threw your reinforced lasso with perfect precision. After a brief struggle, you hogtied the target, tossed them over your horse, and handed them over to the Sheriff alive. Mission accomplished!',
+  '\u2705 \uD83D\uDE07 You blindsided the outlaw before they could even draw their gun. A heavy pistol-whip knocked them out cold. You brought them in breathing, just like the poster asked.',
+  "\u2705 \uD83D\uDE07 They begged for mercy as you tightened the ropes. You didn't listen to their lies, rode straight to the jailhouse, and collected every single dollar of that bounty.",
+  '\u2705 \uD83D\uDE07 It was a long chase through the mud, but your stamina paid off. You tackled them off their horse and secured the bounty alive. The law appreciates the clean work, deputy.',
+  "\u2705 \uD83D\uDE07 Despite the target's desperate attempts to reason with you, you kept your cool. They are now rotting behind bars, and your pockets are heavy with cash.",
+];
+const QUOTES_FAIL_ALIVE = [
+  '\u274C You tried to lasso them, but your rope caught a tree branch instead! The target laughed, fired a parting shot grazing your shoulder, and vanished into the woods.',
+  '\u274C You got too close trying to hogtie them, and they caught you with a cheap shot to the jaw. By the time you cleared your head, all you could see was the dust left by their horse.',
+  '\u274C The bounty pretended to surrender, but drew a hidden knife as you approached. They slashed your arm and escaped into the foggy hills.',
+  '\u274C Your horse got spooked by a snake right as you were about to rope the outlaw. You were thrown into the dirt while the target rode away into the sunset.',
+  "\u274C You hesitated, trying not to kill them, but they didn't share your mercy. They shot your gun out of your hand and left you bleeding in the mud as they fled.",
+];
+const QUOTES_SUCCESS_DEAD = [
+  '\u2705 \uD83D\uDE08 You kicked the cabin door open, activated your Dead Eye, and put three rounds straight into their chest. The outlaw hit the floor before they could even blink. Dead as a doornail.',
+  '\u2705 \uD83D\uDE08 A single, cold-blooded sniper shot from the ridge took the target right off their saddle. You loaded the lifeless body onto your horse to claim your reward.',
+  "\u2705 \uD83D\uDE08 The outlaw drew fast, but you drew faster. Your revolver barked once, and the target slumped into the dirt. The Sheriff didn't care about the body, as long as the threat was gone.",
+  "\u2705 \uD83D\uDE08 After a brutal shootout behind the saloon, you finally cornered them. One last bullet ended the contract. It's a bloody business, but it pays the bills.",
+  "\u2705 \uD83D\uDE08 They chose to go out in a blaze of glory. You obliged. After a heavy exchange of gunfire, the target lay still. You cut off their distinct belt buckle as proof for the bounty.",
+];
+const QUOTES_FAIL_DEAD = [
+  '\u274C You opened fire, but the outlaw was dug in deep behind solid cover. They pinned you down with a repeating rifle and outmaneuvered you. You barely escaped with your life.',
+  '\u274C Your revolver clicked on an empty chamber! In that split second of panic, the target shot you in the thigh and rode away, mocking your poor preparation.',
+  "\u274C As you pulled the trigger, dynamite was thrown from the outlaw's camp! The blast threw you back, ringing your ears. When the smoke cleared, they were long gone.",
+  "\u274C You walked right into a trap. The target's gang members flanked you from the trees. Outgunned and outnumbered, you had to retreat empty-handed.",
+  "\u274C The target proved to be a legendary gunslinger. They dodged your initial shots and placed a bullet right through your shoulder before disappearing into the canyon. Today is not your day.",
+];
+
+function randomQuote(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+/**
+ * Returns the win-chance % for a given bounty action.
+ * bountyType: 'deadoralive' | 'alive'
+ * action:     'kill' | 'catch'
+ */
+function getBountyWinChance(cost, bountyType, action) {
+  if (bountyType === 'deadoralive') {
+    if (cost <= 25)  return 50;
+    if (cost <= 75)  return 30;
+    if (cost <= 100) return 15;
+    if (cost <= 200) return 8;
+    if (cost <= 500) return 3;
+    return 1;
+  }
+  if (action === 'kill') {
+    if (cost <= 25)  return 70;
+    if (cost <= 75)  return 50;
+    if (cost <= 100) return 35;
+    if (cost <= 200) return 10;
+    if (cost <= 500) return 5;
+    return 1;
+  }
+  // alive + catch
+  if (cost <= 25)  return 60;
+  if (cost <= 75)  return 45;
+  if (cost <= 100) return 20;
+  if (cost <= 200) return 8;
+  if (cost <= 500) return 3;
+  return 1;
+}
+
 // Achievement system
+
 const ACHIEVEMENT_ANNOUNCE_CHANNEL = '1509170799133589704';
 const ACHIEVEMENTS_COMMAND_CHANNELS = ['1474179171843313926', '1265305843331497995'];
 
@@ -1917,7 +2005,301 @@ client.on('messageCreate', async (message) => {
     );
     console.log(`[ADMIN] !unwinner applied to ${targetUser.tag} (${targetId}) by ${message.author.tag}.`);
   }
+
+  // ============================================================
+  // BOUNTY COMMANDS
+  // ============================================================
+
+  // !addbounty <name> <cost> <deadoralive|alive>  (admin only, specific channel)
+  if (message.content.toLowerCase().startsWith('!addbounty')) {
+    if (message.channel.id !== ADDBOUNTY_CHANNEL) return;
+    if (message.author.id !== ADMIN_USER_ID) return;
+
+    const args = message.content.trim().split(/\s+/);
+    // Structure: !addbounty [name words...] <cost> <type>
+    if (args.length < 4) {
+      message.reply('Usage: `!addbounty <name> <bountycost> <deadoralive/alive>`\nName can be 2 or 3 words. Example: `!addbounty John Smith 50 alive`');
+      return;
+    }
+
+    const typeArg = args[args.length - 1].toLowerCase();
+    if (typeArg !== 'deadoralive' && typeArg !== 'alive') {
+      message.reply('\u274C Bounty type must be `deadoralive` or `alive`.');
+      return;
+    }
+
+    const costArg = parseInt(args[args.length - 2], 10);
+    if (isNaN(costArg) || costArg <= 0 || costArg > 1000) {
+      message.reply('\u274C Bounty cost must be a positive number between 1 and 1000.');
+      return;
+    }
+
+    const nameParts = args.slice(1, args.length - 2);
+    if (nameParts.length < 1) {
+      message.reply('Usage: `!addbounty <name> <bountycost> <deadoralive/alive>`');
+      return;
+    }
+    const bountyName = nameParts.join(' ');
+
+    // Generate unique random 2-digit ID (10–99)
+    const existingBounties = await Bounty.find({}, 'bountyId');
+    const usedIds = new Set(existingBounties.map(b => b.bountyId));
+    if (usedIds.size >= 90) {
+      message.reply('\u274C All 2-digit bounty IDs are in use (90 max). Remove some bounties first.');
+      return;
+    }
+    let bountyId;
+    do {
+      bountyId = String(Math.floor(Math.random() * 90) + 10);
+    } while (usedIds.has(bountyId));
+
+    await Bounty.create({ bountyId, name: bountyName, cost: costArg, type: typeArg });
+
+    const typeLabel = typeArg === 'deadoralive' ? 'Dead or Alive' : 'Alive Only';
+    message.reply(
+      `\uD83E\uDD20 **New Bounty Posted!**\n\n` +
+      `**ID:** \`${bountyId}\`\n` +
+      `**Name:** ${bountyName}\n` +
+      `**Reward:** ${costArg} coins \uD83E\uDE99\n` +
+      `**Type:** ${typeLabel}\n\n` +
+      `Use \`!bounty ${bountyId}\` to start hunting!`
+    );
+    console.log(`[ADMIN] Bounty #${bountyId} added: "${bountyName}" (${costArg} coins, ${typeArg}) by ${message.author.tag}`);
+  }
+
+  // !bounty — list all bounties
+  // !bounty <id> — start a hunt
+  if (message.content.toLowerCase() === '!bounty' || message.content.toLowerCase().startsWith('!bounty ')) {
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+
+    const args   = message.content.trim().split(/\s+/);
+    const userId = message.author.id;
+
+    // --- List mode ---
+    if (args.length === 1) {
+      const bounties = await Bounty.find({}).sort({ createdAt: 1 });
+      if (bounties.length === 0) {
+        message.reply('\uD83E\uDD20 There are no active bounties right now. Check back later!');
+        return;
+      }
+      let text = '\uD83E\uDD20 **WANTED — ACTIVE BOUNTIES**\n\n';
+      for (const b of bounties) {
+        const typeLabel   = b.type === 'deadoralive' ? 'Dead or Alive' : 'Alive Only';
+        const huntingTag  = (bountiesBeingHunted.get(b.bountyId)?.size ?? 0) > 0 ? ' \uD83D\uDD0D *(being hunted)*' : '';
+        text += `**[${b.bountyId}]** ${b.name} — **${b.cost} coins** — ${typeLabel}${huntingTag}\n`;
+      }
+      text += '\nUse `!bounty <id>` to start hunting a bounty.';
+      message.reply(text);
+      return;
+    }
+
+    // --- Hunt mode ---
+    const bountyId = args[1];
+
+    // Cooldown check
+    const cooldownExpiry = bountyCooldowns.get(userId);
+    if (cooldownExpiry && Date.now() < cooldownExpiry) {
+      const expirySec = Math.floor(cooldownExpiry / 1000);
+      message.reply(`\u23F3 You're still recovering from your last hunt. You can ride out again <t:${expirySec}:R>.`);
+      return;
+    }
+
+    // Already hunting?
+    if (activeBountyHunters.has(userId)) {
+      message.reply('\uD83E\uDD20 You are already on a bounty hunt! Finish it first.');
+      return;
+    }
+
+    // Fetch the bounty
+    const bounty = await Bounty.findOne({ bountyId });
+    if (!bounty) {
+      message.reply(`\u274C No bounty found with ID \`${bountyId}\`. Use \`!bounty\` to see the list.`);
+      return;
+    }
+
+    // Register hunter
+    if (!bountiesBeingHunted.has(bountyId)) bountiesBeingHunted.set(bountyId, new Set());
+    const hunters      = bountiesBeingHunted.get(bountyId);
+    const alreadyHunted = hunters.size > 0;
+    hunters.add(userId);
+    activeBountyHunters.set(userId, { bountyId, stage: 'traveling', channelId: message.channel.id });
+
+    const warningLine = alreadyHunted
+      ? '\n\u26A0\uFE0F Someone else is already on this bounty. The first hunter to bring them in takes the reward — you\'ll lose your chance if they succeed first.'
+      : '';
+
+    message.reply(
+      `\uD83E\uDD20 **Bounty Hunt Started!**${warningLine}\n\n` +
+      `\uD83D\uDC34 Riding to **${bounty.name}**'s last seen location...`
+    );
+
+    // Travel delay: 3–10 seconds
+    const travelDelay = (Math.floor(Math.random() * 8) + 3) * 1000;
+    setTimeout(async () => {
+      if (!activeBountyHunters.has(userId)) return; // cleaned up elsewhere
+
+      // Verify bounty still exists
+      const stillExists = await Bounty.findOne({ bountyId });
+      if (!stillExists) {
+        activeBountyHunters.delete(userId);
+        bountiesBeingHunted.get(bountyId)?.delete(userId);
+        const coolExp = Date.now() + BOUNTY_COOLDOWN_MS;
+        bountyCooldowns.set(userId, coolExp);
+        message.channel.send(
+          `<@${userId}> \uD83D\uDCA8 You arrived at the location, but **${bounty.name}** has already been brought in by another hunter. You're on cooldown until <t:${Math.floor(coolExp / 1000)}:R>.`
+        ).catch(() => {});
+        return;
+      }
+
+      activeBountyHunters.set(userId, { bountyId, stage: 'searching', channelId: message.channel.id });
+      message.channel.send(
+        `<@${userId}> \uD83C\uDFDC\uFE0F You've arrived. Use \`!eagleeye\` to search for **${bounty.name}**!`
+      ).catch(() => {});
+    }, travelDelay);
+  }
+
+  // !eagleeye — search for the target (85% find chance)
+  if (message.content.toLowerCase() === '!eagleeye') {
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+
+    const userId = message.author.id;
+    const hunt   = activeBountyHunters.get(userId);
+
+    if (!hunt) {
+      message.reply('You are not on a bounty hunt. Use `!bounty <id>` to start one.');
+      return;
+    }
+    if (hunt.stage === 'traveling') {
+      message.reply('\uD83D\uDC34 You\'re still riding to the location — wait until you arrive!');
+      return;
+    }
+    if (hunt.stage === 'found') {
+      message.reply('You already have eyes on the target! Use `!kill` or `!catch`.');
+      return;
+    }
+    if (hunt.channelId !== message.channel.id) {
+      message.reply(`Please continue your hunt in <#${hunt.channelId}>.`);
+      return;
+    }
+
+    // Verify bounty still exists
+    const bounty = await Bounty.findOne({ bountyId: hunt.bountyId });
+    if (!bounty) {
+      activeBountyHunters.delete(userId);
+      bountiesBeingHunted.get(hunt.bountyId)?.delete(userId);
+      const coolExp = Date.now() + BOUNTY_COOLDOWN_MS;
+      bountyCooldowns.set(userId, coolExp);
+      message.reply(`\uD83D\uDCA8 Your target was already brought in by another hunter. You're on cooldown until <t:${Math.floor(coolExp / 1000)}:R>.`);
+      return;
+    }
+
+    if (Math.random() < 0.85) {
+      // Found!
+      activeBountyHunters.set(userId, { ...hunt, stage: 'found' });
+      const typeLabel  = bounty.type === 'deadoralive' ? 'Dead or Alive' : 'Alive Only';
+      const actionLine = bounty.type === 'deadoralive'
+        ? 'Use `!kill` or `!catch` to claim the full bounty!'
+        : `Use \`!catch\` for the full reward (**${bounty.cost} coins**) or \`!kill\` for a reduced payout (**${Math.floor(bounty.cost / 4)} coins**).`;
+      message.reply(
+        `\uD83E\uDDFF **Eagle Eye Activated!** You spotted **${bounty.name}** hiding in the shadows!\n\n` +
+        `**Bounty:** ${bounty.name}\n` +
+        `**Reward:** ${bounty.cost} coins\n` +
+        `**Type:** ${typeLabel}\n\n` +
+        actionLine
+      );
+    } else {
+      message.reply(`\uD83E\uDDFF **Eagle Eye Activated!** No sign of **${bounty.name}** yet... They must be hiding. Try \`!eagleeye\` again!`);
+    }
+  }
+
+  // !kill / !catch — resolve the hunt
+  if (message.content.toLowerCase() === '!kill' || message.content.toLowerCase() === '!catch') {
+    if (!ALLOWED_COMMAND_CHANNELS.includes(message.channel.id)) return;
+
+    const userId = message.author.id;
+    const action = message.content.toLowerCase() === '!kill' ? 'kill' : 'catch';
+    const hunt   = activeBountyHunters.get(userId);
+
+    if (!hunt) {
+      message.reply('You are not on a bounty hunt. Use `!bounty <id>` to start one.');
+      return;
+    }
+    if (hunt.stage === 'traveling') {
+      message.reply('\uD83D\uDC34 You\'re still riding to the location!');
+      return;
+    }
+    if (hunt.stage === 'searching') {
+      message.reply('\uD83E\uDDFF You haven\'t found the target yet! Use `!eagleeye` to search.');
+      return;
+    }
+    if (hunt.channelId !== message.channel.id) {
+      message.reply(`Please continue your hunt in <#${hunt.channelId}>.`);
+      return;
+    }
+
+    // Clean up hunter state immediately
+    activeBountyHunters.delete(userId);
+    bountiesBeingHunted.get(hunt.bountyId)?.delete(userId);
+
+    // Apply 6-hour cooldown
+    const cooldownExpiry = Date.now() + BOUNTY_COOLDOWN_MS;
+    bountyCooldowns.set(userId, cooldownExpiry);
+    const coolSec = Math.floor(cooldownExpiry / 1000);
+
+    // Fetch bounty
+    const bounty = await Bounty.findOne({ bountyId: hunt.bountyId });
+    if (!bounty) {
+      message.reply(`\uD83D\uDCA8 The bounty on your target was already collected by another hunter. You're on cooldown until <t:${coolSec}:R>.`);
+      return;
+    }
+
+    // Determine payout (alive bounty + kill = quarter reward)
+    const reward = (bounty.type === 'alive' && action === 'kill')
+      ? Math.floor(bounty.cost / 4)
+      : bounty.cost;
+
+    // Roll the dice
+    const winChance = getBountyWinChance(bounty.cost, bounty.type, action);
+    const won       = Math.random() * 100 < winChance;
+
+    if (won) {
+      // Award coins
+      let currentCoins = userCoins.get(userId);
+      if (currentCoins === undefined) {
+        await loadUserData(userId);
+        currentCoins = userCoins.get(userId) || 0;
+      }
+      const newCoins = currentCoins + reward;
+      userCoins.set(userId, newCoins);
+      saveUserCoins(userId, newCoins).catch(err => console.error('Error saving bounty reward:', err));
+
+      // Remove bounty and clear all remaining hunters
+      await Bounty.deleteOne({ bountyId: hunt.bountyId });
+      bountiesBeingHunted.delete(hunt.bountyId);
+
+      const quote      = action === 'catch' ? randomQuote(QUOTES_SUCCESS_ALIVE) : randomQuote(QUOTES_SUCCESS_DEAD);
+      const rewardNote = (bounty.type === 'alive' && action === 'kill')
+        ? `\uD83D\uDCB8 Reduced reward (alive-only bounty, killed instead of caught): **${reward} coins**.`
+        : `\uD83D\uDCB0 Full reward: **${reward} coins**!`;
+
+      message.reply(
+        `${quote}\n\n` +
+        `${rewardNote}\n` +
+        `Balance: **${newCoins} coins**\n` +
+        `\u23F3 Cooldown until <t:${coolSec}:R>.`
+      );
+      console.log(`[Bounty] ${userId} ${action}ed #${hunt.bountyId} "${bounty.name}" — earned ${reward} coins.`);
+    } else {
+      const quote = action === 'catch' ? randomQuote(QUOTES_FAIL_ALIVE) : randomQuote(QUOTES_FAIL_DEAD);
+      message.reply(
+        `${quote}\n\n` +
+        `\uD83D\uDCB8 You earned nothing this time.\n` +
+        `\u23F3 Cooldown until <t:${coolSec}:R>.`
+      );
+    }
+  }
 });
+
 
 client.on('messageUpdate', async (oldMessage, newMessage) => {
   // Ignore messages from bots
