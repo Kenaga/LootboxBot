@@ -264,8 +264,9 @@ const WINNER_RESTRICTED_CHANNELS = [                           // channels where
 ];
 const WINNER_DURATION_MS = 45 * 24 * 60 * 60 * 1000;           // 45 days in ms
 
-// In-memory map: userId -> setTimeout handle for winner expiry
-const winnerExpiryTimers = new Map();
+// NOTE: We intentionally do NOT use per-user setTimeout for winner expiry.
+// Node.js setTimeout silently misfires for delays > ~24.8 days (2^31-1 ms).
+// Instead, a single hourly setInterval (started in ready) polls the DB.
 
 // --- Winner helper functions ---
 
@@ -326,30 +327,9 @@ async function removeWinnerRestrictions(guild, userId) {
 }
 
 /**
- * Schedule automatic expiry of a winner restriction.
- * Clears any existing timer for that user first.
+ * Called by the hourly poll to expire a single winner record.
  */
-function scheduleWinnerExpiry(userId, guildId, expiresAt) {
-  // Cancel existing timer if any
-  if (winnerExpiryTimers.has(userId)) {
-    clearTimeout(winnerExpiryTimers.get(userId));
-    winnerExpiryTimers.delete(userId);
-  }
-
-  const delay = expiresAt - Date.now();
-
-  if (delay <= 0) {
-    // Already expired — handle immediately
-    handleWinnerExpiry(userId, guildId);
-    return;
-  }
-
-  const handle = setTimeout(() => handleWinnerExpiry(userId, guildId), delay);
-  winnerExpiryTimers.set(userId, handle);
-}
-
 async function handleWinnerExpiry(userId, guildId) {
-  winnerExpiryTimers.delete(userId);
   try {
     const guild = await client.guilds.fetch(guildId);
     const member = await guild.members.fetch(userId).catch(() => null);
@@ -371,6 +351,35 @@ async function handleWinnerExpiry(userId, guildId) {
   } catch (err) {
     console.error('Error handling winner expiry:', err);
   }
+}
+
+/**
+ * Polls MongoDB every hour for expired winner records and removes them.
+ * Using setInterval instead of per-user setTimeout because Node.js
+ * setTimeout silently misfires for delays > ~24.8 days (2^31-1 ms limit).
+ */
+function startWinnerExpiryPoller(guildId) {
+  const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
+  async function checkExpiredWinners() {
+    try {
+      const now = Date.now();
+      const expired = await WinnerRecord.find({ expiresAt: { $lte: now } });
+      for (const record of expired) {
+        console.log(`[Winner] Expiring winner record for user ${record.userId}`);
+        await handleWinnerExpiry(record.userId, guildId);
+      }
+    } catch (err) {
+      console.error('Error in winner expiry poller:', err);
+    }
+  }
+
+  // Run once immediately on startup (catches anything that expired while bot was offline)
+  checkExpiredWinners();
+
+  // Then run every hour
+  setInterval(checkExpiredWinners, CHECK_INTERVAL_MS);
+  console.log('[Winner] Expiry poller started (checks every hour).');
 }
 
 // Achievement system
@@ -776,18 +785,12 @@ client.on('ready', async () => {
     console.log(`📊 Loaded ${userCoins.size} users with coins`);
     console.log(`⏰ Restored ${roleExpirationsData.size} role expiration timers`);
 
-    // Restore winner expiry timers
-    try {
-      const winnerRecords = await WinnerRecord.find({});
-      const guildId = client.guilds.cache.first()?.id;
-      if (guildId) {
-        for (const record of winnerRecords) {
-          scheduleWinnerExpiry(record.userId, guildId, record.expiresAt);
-        }
-        console.log(`🏆 Restored ${winnerRecords.length} winner expiry timer(s).`);
-      }
-    } catch (err) {
-      console.error('Error restoring winner timers:', err);
+    // Start the hourly poller that checks for expired winner records.
+    // (We use a poller instead of per-user setTimeout because 45 days exceeds
+    //  Node.js's ~24.8-day setTimeout maximum, which causes immediate misfires.)
+    const guildId = client.guilds.cache.first()?.id;
+    if (guildId) {
+      startWinnerExpiryPoller(guildId);
     }
   } catch (error) {
     console.error('Error loading users from database:', error);
@@ -1863,10 +1866,9 @@ client.on('messageCreate', async (message) => {
       console.error(`Error adding winner role to ${targetId}:`, err)
     );
 
-    // Persist record and schedule expiry
+    // Persist record — the hourly poller will handle expiry automatically
     const expiresAt = Date.now() + WINNER_DURATION_MS;
     await saveWinnerRecord(targetId, expiresAt);
-    scheduleWinnerExpiry(targetId, message.guild.id, expiresAt);
 
     const expiryTimestamp = Math.floor(expiresAt / 1000);
     message.reply(
@@ -1891,12 +1893,6 @@ client.on('messageCreate', async (message) => {
     }
 
     const targetId = targetUser.id;
-
-    // Cancel any pending expiry timer
-    if (winnerExpiryTimers.has(targetId)) {
-      clearTimeout(winnerExpiryTimers.get(targetId));
-      winnerExpiryTimers.delete(targetId);
-    }
 
     // Remove channel permission overwrites
     await removeWinnerRestrictions(message.guild, targetId);
