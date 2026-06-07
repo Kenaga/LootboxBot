@@ -2166,12 +2166,11 @@ client.on('messageCreate', async (message) => {
       // Verify bounty still exists
       const stillExists = await Bounty.findOne({ bountyId });
       if (!stillExists) {
+        // Bounty was claimed by another hunter — no cooldown for this hunter
         activeBountyHunters.delete(userId);
         bountiesBeingHunted.get(bountyId)?.delete(userId);
-        const coolExp = Date.now() + getBountyCooldownMs(bounty.cost);
-        bountyCooldowns.set(userId, coolExp);
         message.channel.send(
-          `<@${userId}> \uD83D\uDCA8 You arrived at the location, but **${bounty.name}** has already been brought in by another hunter. You're on cooldown until <t:${Math.floor(coolExp / 1000)}:R>.`
+          `<@${userId}> \uD83D\uDCA8 You arrived at the location, but **${bounty.name}** has already been brought in by another hunter. You're free to hunt again immediately!`
         ).catch(() => {});
         return;
       }
@@ -2210,11 +2209,10 @@ client.on('messageCreate', async (message) => {
     // Verify bounty still exists
     const bounty = await Bounty.findOne({ bountyId: hunt.bountyId });
     if (!bounty) {
+      // Bounty was claimed by another hunter before this player could act — no cooldown
       activeBountyHunters.delete(userId);
       bountiesBeingHunted.get(hunt.bountyId)?.delete(userId);
-      const coolExp = Date.now() + getBountyCooldownMs(bounty.cost);
-      bountyCooldowns.set(userId, coolExp);
-      message.reply(`\uD83D\uDCA8 Your target was already brought in by another hunter. You're on cooldown until <t:${Math.floor(coolExp / 1000)}:R>.`);
+      message.reply(`\uD83D\uDCA8 Your target was already brought in by another hunter. You're free to hunt again immediately!`);
       return;
     }
 
@@ -2266,7 +2264,16 @@ client.on('messageCreate', async (message) => {
     activeBountyHunters.delete(userId);
     bountiesBeingHunted.get(hunt.bountyId)?.delete(userId);
 
+    // Fetch bounty first — if it's already gone, the player gets no cooldown
+    const bounty = await Bounty.findOne({ bountyId: hunt.bountyId });
+    if (!bounty) {
+      // Another hunter claimed it before this player's kill/catch resolved — no cooldown
+      message.reply(`\uD83D\uDCA8 The bounty on your target was already collected by another hunter. You're free to hunt again immediately!`);
+      return;
+    }
+
     // Apply tiered cooldown based on bounty cost (admin is immune)
+    // Only reaches here if this player is the one actually attempting the action
     const isAdmin = userId === ADMIN_USER_ID;
     let coolSec = null;
     if (!isAdmin) {
@@ -2275,13 +2282,6 @@ client.on('messageCreate', async (message) => {
       coolSec = Math.floor(cooldownExpiry / 1000);
     }
     const cooldownLine = coolSec ? `\u23F3 Cooldown until <t:${coolSec}:R>.` : '\u2705 No cooldown (admin).';
-
-    // Fetch bounty
-    const bounty = await Bounty.findOne({ bountyId: hunt.bountyId });
-    if (!bounty) {
-      message.reply(`\uD83D\uDCA8 The bounty on your target was already collected by another hunter. ${cooldownLine}`);
-      return;
-    }
 
     // Determine payout (alive bounty + kill = quarter reward)
     const reward = (bounty.type === 'alive' && action === 'kill')
