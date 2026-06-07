@@ -2096,12 +2096,14 @@ client.on('messageCreate', async (message) => {
     // --- Hunt mode ---
     const bountyId = args[1];
 
-    // Cooldown check
-    const cooldownExpiry = bountyCooldowns.get(userId);
-    if (cooldownExpiry && Date.now() < cooldownExpiry) {
-      const expirySec = Math.floor(cooldownExpiry / 1000);
-      message.reply(`\u23F3 You're still recovering from your last hunt. You can ride out again <t:${expirySec}:R>.`);
-      return;
+    // Cooldown check (admin is immune)
+    if (userId !== ADMIN_USER_ID) {
+      const cooldownExpiry = bountyCooldowns.get(userId);
+      if (cooldownExpiry && Date.now() < cooldownExpiry) {
+        const expirySec = Math.floor(cooldownExpiry / 1000);
+        message.reply(`\u23F3 You're still recovering from your last hunt. You can ride out again <t:${expirySec}:R>.`);
+        return;
+      }
     }
 
     // Already hunting?
@@ -2241,15 +2243,20 @@ client.on('messageCreate', async (message) => {
     activeBountyHunters.delete(userId);
     bountiesBeingHunted.get(hunt.bountyId)?.delete(userId);
 
-    // Apply 6-hour cooldown
-    const cooldownExpiry = Date.now() + BOUNTY_COOLDOWN_MS;
-    bountyCooldowns.set(userId, cooldownExpiry);
-    const coolSec = Math.floor(cooldownExpiry / 1000);
+    // Apply 6-hour cooldown (admin is immune)
+    const isAdmin = userId === ADMIN_USER_ID;
+    let coolSec = null;
+    if (!isAdmin) {
+      const cooldownExpiry = Date.now() + BOUNTY_COOLDOWN_MS;
+      bountyCooldowns.set(userId, cooldownExpiry);
+      coolSec = Math.floor(cooldownExpiry / 1000);
+    }
+    const cooldownLine = coolSec ? `\u23F3 Cooldown until <t:${coolSec}:R>.` : '\u2705 No cooldown (admin).';
 
     // Fetch bounty
     const bounty = await Bounty.findOne({ bountyId: hunt.bountyId });
     if (!bounty) {
-      message.reply(`\uD83D\uDCA8 The bounty on your target was already collected by another hunter. You're on cooldown until <t:${coolSec}:R>.`);
+      message.reply(`\uD83D\uDCA8 The bounty on your target was already collected by another hunter. ${cooldownLine}`);
       return;
     }
 
@@ -2286,7 +2293,7 @@ client.on('messageCreate', async (message) => {
         `${quote}\n\n` +
         `${rewardNote}\n` +
         `Balance: **${newCoins} coins**\n` +
-        `\u23F3 Cooldown until <t:${coolSec}:R>.`
+        `${cooldownLine}`
       );
       console.log(`[Bounty] ${userId} ${action}ed #${hunt.bountyId} "${bounty.name}" — earned ${reward} coins.`);
     } else {
@@ -2294,7 +2301,7 @@ client.on('messageCreate', async (message) => {
       message.reply(
         `${quote}\n\n` +
         `\uD83D\uDCB8 You earned nothing this time.\n` +
-        `\u23F3 Cooldown until <t:${coolSec}:R>.`
+        `${cooldownLine}`
       );
     }
   }
