@@ -38,6 +38,8 @@ const userSchema = new mongoose.Schema({
     duelsChallenged:      { type: Number, default: 0 },
     duelsWon:             { type: Number, default: 0 },
     jeffFinds:            { type: Number, default: 0 },
+    bountiesHunted:       { type: Number, default: 0 },
+    legendaryBounty:      { type: Number, default: 0 },
   },
   unlockedAchievements: { type: [String], default: [] }
 });
@@ -81,7 +83,7 @@ async function loadUserData(userId) {
     userStats.set(userId, user.stats || { blues: 0, purples: 0, golds: 0, slotsWins: 0, blackjackWins: 0 });
     userInventory.set(userId, user.inventory || []);
     userEquipped.set(userId, { color: user.equippedColor || null, badge: user.equippedBadge || null });
-    userAchievementStats.set(userId, user.achievementStats || { trainHeists: 0, trainCoinsRobbed: 0, blackjackWinsWithBet: 0, duelsChallenged: 0, duelsWon: 0, jeffFinds: 0 });
+    userAchievementStats.set(userId, user.achievementStats || { trainHeists: 0, trainCoinsRobbed: 0, blackjackWinsWithBet: 0, duelsChallenged: 0, duelsWon: 0, jeffFinds: 0, bountiesHunted: 0, legendaryBounty: 0 });
     userUnlockedAchievements.set(userId, user.unlockedAchievements || []);
     if (user.roleExpiresAt) {
       roleExpirationsData.set(userId, user.roleExpiresAt);
@@ -495,12 +497,16 @@ const ACHIEVEMENTS = [
   { id: 'duelWin',      name: "It's High Noon",           description: 'Win 50 duels.',                                   type: 'achStat',   field: 'duelsWon',             threshold: 50    },
   { id: 'jeff1',        name: 'Oh, Here You Are',         description: 'Find Jeff 100 times.',                            type: 'achStat',   field: 'jeffFinds',            threshold: 100   },
   { id: 'jeff2',        name: 'NOM NOM NOM!',             description: 'Find Jeff 500 times.',                            type: 'achStat',   field: 'jeffFinds',            threshold: 500   },
+  // Bounty Hunter achievements
+  { id: 'bounty1',      name: 'The Hunt Begins',          description: 'Hunt down 10 bounties.',                          type: 'achStat',   field: 'bountiesHunted',       threshold: 10    },
+  { id: 'bounty2',      name: 'Bounty Hunter',            description: 'Hunt down 50 bounties.',                          type: 'achStat',   field: 'bountiesHunted',       threshold: 50    },
+  { id: 'bounty3',      name: 'Legendary Gunslinger',     description: 'Hunt down a bounty worth 500 coins or more.',     type: 'achStat',   field: 'legendaryBounty',      threshold: 1     },
 ];
 
 // Increment an achievement-specific stat for a user
 async function incrementAchievementStat(userId, statName, amount = 1) {
   try {
-    const achStats = userAchievementStats.get(userId) || { trainHeists: 0, trainCoinsRobbed: 0, blackjackWinsWithBet: 0, duelsChallenged: 0, duelsWon: 0, jeffFinds: 0 };
+    const achStats = userAchievementStats.get(userId) || { trainHeists: 0, trainCoinsRobbed: 0, blackjackWinsWithBet: 0, duelsChallenged: 0, duelsWon: 0, jeffFinds: 0, bountiesHunted: 0, legendaryBounty: 0 };
     achStats[statName] = (achStats[statName] || 0) + amount;
     userAchievementStats.set(userId, achStats);
     await User.findOneAndUpdate(
@@ -584,6 +590,7 @@ function getAchievementProgress(userId) {
     { label: '🃏 Blackjack',    ids: ['bj1', 'bj2'] },
     { label: '⚔️ Duels',        ids: ['duel1', 'duel2', 'duelWin'] },
     { label: '<:jeffYay:1394970335178129461> Jeff',         ids: ['jeff1', 'jeff2'] },
+    { label: '🤠 Bounty Hunter', ids: ['bounty1', 'bounty2', 'bounty3'] },
   ];
 
   let text = `🏆 **YOUR ACHIEVEMENTS**\n\n`;
@@ -857,7 +864,7 @@ client.on('ready', async () => {
       userStats.set(user.userId, user.stats || { blues: 0, purples: 0, golds: 0, slotsWins: 0, blackjackWins: 0 });
       userInventory.set(user.userId, user.inventory || []);
       userEquipped.set(user.userId, { color: user.equippedColor || null, badge: user.equippedBadge || null });
-      userAchievementStats.set(user.userId, user.achievementStats || { trainHeists: 0, trainCoinsRobbed: 0, blackjackWinsWithBet: 0, duelsChallenged: 0, duelsWon: 0, jeffFinds: 0 });
+      userAchievementStats.set(user.userId, user.achievementStats || { trainHeists: 0, trainCoinsRobbed: 0, blackjackWinsWithBet: 0, duelsChallenged: 0, duelsWon: 0, jeffFinds: 0, bountiesHunted: 0, legendaryBounty: 0 });
       userUnlockedAchievements.set(user.userId, user.unlockedAchievements || []);
       if (user.roleExpiresAt) {
         roleExpirationsData.set(user.userId, user.roleExpiresAt);
@@ -2295,6 +2302,12 @@ client.on('messageCreate', async (message) => {
         `Balance: **${newCoins} coins**\n` +
         `${cooldownLine}`
       );
+      // Track bounty achievements
+      incrementAchievementStat(userId, 'bountiesHunted').catch(err => console.error('Error tracking bountiesHunted:', err));
+      if (bounty.cost >= 500) {
+        incrementAchievementStat(userId, 'legendaryBounty').catch(err => console.error('Error tracking legendaryBounty:', err));
+      }
+      checkAndAwardAchievements(userId).catch(err => console.error('Error checking bounty achievements:', err));
       console.log(`[Bounty] ${userId} ${action}ed #${hunt.bountyId} "${bounty.name}" — earned ${reward} coins.`);
     } else {
       const quote = action === 'catch' ? randomQuote(QUOTES_FAIL_ALIVE) : randomQuote(QUOTES_FAIL_DEAD);
