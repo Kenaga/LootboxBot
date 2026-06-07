@@ -44,6 +44,13 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
+// Winner record schema — tracks users currently under the !winner restriction
+const winnerRecordSchema = new mongoose.Schema({
+  userId:    { type: String, required: true, unique: true },
+  expiresAt: { type: Number, required: true },
+});
+const WinnerRecord = mongoose.model('WinnerRecord', winnerRecordSchema);
+
 // In-memory cache for faster access
 const userCoins = new Map();
 const userStats = new Map();
@@ -247,6 +254,124 @@ const ALLOWED_COMMAND_CHANNELS = [ECONOMY_CHANNEL, '1265305843331497995'];
 
 // Admin user ID
 const ADMIN_USER_ID = '334000664130617345';
+
+// Winner command settings
+const WINNER_COMMAND_CHANNEL  = '1265305843331497995';          // only channel where !winner/!unwinner can be used
+const WINNER_ROLE_ID          = '1372587488157237390';          // role given to winners
+const WINNER_RESTRICTED_CHANNELS = [                           // channels where View Channel is denied
+  '1265305202538577991',
+  '1471881938502418442',
+];
+const WINNER_DURATION_MS = 45 * 24 * 60 * 60 * 1000;           // 45 days in ms
+
+// In-memory map: userId -> setTimeout handle for winner expiry
+const winnerExpiryTimers = new Map();
+
+// --- Winner helper functions ---
+
+async function saveWinnerRecord(userId, expiresAt) {
+  try {
+    await WinnerRecord.findOneAndUpdate(
+      { userId },
+      { expiresAt },
+      { upsert: true, new: true }
+    );
+  } catch (err) {
+    console.error('Error saving winner record:', err);
+  }
+}
+
+async function removeWinnerRecord(userId) {
+  try {
+    await WinnerRecord.deleteOne({ userId });
+  } catch (err) {
+    console.error('Error removing winner record:', err);
+  }
+}
+
+/**
+ * Deny "View Channel" for `userId` on every WINNER_RESTRICTED_CHANNELS channel.
+ * Uses channel permission overwrites so the deny is user-specific.
+ */
+async function applyWinnerRestrictions(guild, userId) {
+  const { PermissionsBitField } = require('discord.js');
+  for (const channelId of WINNER_RESTRICTED_CHANNELS) {
+    try {
+      const channel = await guild.channels.fetch(channelId);
+      if (!channel) continue;
+      await channel.permissionOverwrites.edit(userId, {
+        ViewChannel: false,
+      });
+    } catch (err) {
+      console.error(`Error applying winner restriction on channel ${channelId}:`, err);
+    }
+  }
+}
+
+/**
+ * Completely remove the user's permission overwrite from both restricted channels.
+ * This is cleaner than just un-ticking View Channel — it removes the whole overwrite.
+ */
+async function removeWinnerRestrictions(guild, userId) {
+  for (const channelId of WINNER_RESTRICTED_CHANNELS) {
+    try {
+      const channel = await guild.channels.fetch(channelId);
+      if (!channel) continue;
+      const overwrite = channel.permissionOverwrites.cache.get(userId);
+      if (overwrite) await overwrite.delete();
+    } catch (err) {
+      console.error(`Error removing winner restriction on channel ${channelId}:`, err);
+    }
+  }
+}
+
+/**
+ * Schedule automatic expiry of a winner restriction.
+ * Clears any existing timer for that user first.
+ */
+function scheduleWinnerExpiry(userId, guildId, expiresAt) {
+  // Cancel existing timer if any
+  if (winnerExpiryTimers.has(userId)) {
+    clearTimeout(winnerExpiryTimers.get(userId));
+    winnerExpiryTimers.delete(userId);
+  }
+
+  const delay = expiresAt - Date.now();
+
+  if (delay <= 0) {
+    // Already expired — handle immediately
+    handleWinnerExpiry(userId, guildId);
+    return;
+  }
+
+  const handle = setTimeout(() => handleWinnerExpiry(userId, guildId), delay);
+  winnerExpiryTimers.set(userId, handle);
+}
+
+async function handleWinnerExpiry(userId, guildId) {
+  winnerExpiryTimers.delete(userId);
+  try {
+    const guild = await client.guilds.fetch(guildId);
+    const member = await guild.members.fetch(userId).catch(() => null);
+
+    // Remove channel permission overwrites
+    await removeWinnerRestrictions(guild, userId);
+
+    // Remove the winner role if the member is still in the server
+    if (member && member.roles.cache.has(WINNER_ROLE_ID)) {
+      await member.roles.remove(WINNER_ROLE_ID).catch(err =>
+        console.error(`Error removing winner role from ${userId}:`, err)
+      );
+    }
+
+    // Clean up database
+    await removeWinnerRecord(userId);
+
+    console.log(`[Winner] Restrictions automatically removed for user ${userId} after 45 days.`);
+  } catch (err) {
+    console.error('Error handling winner expiry:', err);
+  }
+}
 
 // Achievement system
 const ACHIEVEMENT_ANNOUNCE_CHANNEL = '1509170799133589704';
@@ -650,6 +775,20 @@ client.on('ready', async () => {
     
     console.log(`📊 Loaded ${userCoins.size} users with coins`);
     console.log(`⏰ Restored ${roleExpirationsData.size} role expiration timers`);
+
+    // Restore winner expiry timers
+    try {
+      const winnerRecords = await WinnerRecord.find({});
+      const guildId = client.guilds.cache.first()?.id;
+      if (guildId) {
+        for (const record of winnerRecords) {
+          scheduleWinnerExpiry(record.userId, guildId, record.expiresAt);
+        }
+        console.log(`🏆 Restored ${winnerRecords.length} winner expiry timer(s).`);
+      }
+    } catch (err) {
+      console.error('Error restoring winner timers:', err);
+    }
   } catch (error) {
     console.error('Error loading users from database:', error);
   }
@@ -1693,6 +1832,94 @@ client.on('messageCreate', async (message) => {
       console.error('Error resetting blues:', err);
       message.reply('❌ An error occurred while resetting blues. Check the console.');
     }
+  }
+
+  // !winner command — admin only, only in WINNER_COMMAND_CHANNEL
+  // Usage: !winner @user
+  if (message.content.toLowerCase().startsWith('!winner')) {
+    if (message.channel.id !== WINNER_COMMAND_CHANNEL) return;
+    if (message.author.id !== ADMIN_USER_ID) return;
+
+    const targetUser = message.mentions.users.first();
+    if (!targetUser) {
+      message.reply('Usage: `!winner @user`');
+      return;
+    }
+
+    const targetId = targetUser.id;
+    let targetMember;
+    try {
+      targetMember = await message.guild.members.fetch(targetId);
+    } catch {
+      message.reply(`❌ Could not find that member in the server.`);
+      return;
+    }
+
+    // Apply channel permission overwrites (deny View Channel)
+    await applyWinnerRestrictions(message.guild, targetId);
+
+    // Give the winner role
+    await targetMember.roles.add(WINNER_ROLE_ID).catch(err =>
+      console.error(`Error adding winner role to ${targetId}:`, err)
+    );
+
+    // Persist record and schedule expiry
+    const expiresAt = Date.now() + WINNER_DURATION_MS;
+    await saveWinnerRecord(targetId, expiresAt);
+    scheduleWinnerExpiry(targetId, message.guild.id, expiresAt);
+
+    const expiryTimestamp = Math.floor(expiresAt / 1000);
+    message.reply(
+      `✅ ${targetUser} has been marked as a **winner**!\n` +
+      `• View Channel denied on <#${WINNER_RESTRICTED_CHANNELS[0]}> and <#${WINNER_RESTRICTED_CHANNELS[1]}>.\n` +
+      `• Winner role assigned.\n` +
+      `• Restrictions will be automatically removed <t:${expiryTimestamp}:R> (<t:${expiryTimestamp}:F>).`
+    );
+    console.log(`[ADMIN] !winner applied to ${targetUser.tag} (${targetId}) by ${message.author.tag}. Expires at ${new Date(expiresAt).toISOString()}`);
+  }
+
+  // !unwinner command — admin only, only in WINNER_COMMAND_CHANNEL
+  // Usage: !unwinner @user
+  if (message.content.toLowerCase().startsWith('!unwinner')) {
+    if (message.channel.id !== WINNER_COMMAND_CHANNEL) return;
+    if (message.author.id !== ADMIN_USER_ID) return;
+
+    const targetUser = message.mentions.users.first();
+    if (!targetUser) {
+      message.reply('Usage: `!unwinner @user`');
+      return;
+    }
+
+    const targetId = targetUser.id;
+
+    // Cancel any pending expiry timer
+    if (winnerExpiryTimers.has(targetId)) {
+      clearTimeout(winnerExpiryTimers.get(targetId));
+      winnerExpiryTimers.delete(targetId);
+    }
+
+    // Remove channel permission overwrites
+    await removeWinnerRestrictions(message.guild, targetId);
+
+    // Remove the winner role (if the member is still in the server)
+    try {
+      const targetMember = await message.guild.members.fetch(targetId);
+      if (targetMember.roles.cache.has(WINNER_ROLE_ID)) {
+        await targetMember.roles.remove(WINNER_ROLE_ID);
+      }
+    } catch {
+      // Member may have left — that's fine, just skip role removal
+    }
+
+    // Remove from database
+    await removeWinnerRecord(targetId);
+
+    message.reply(
+      `✅ ${targetUser}'s **winner** restrictions have been removed.\n` +
+      `• Channel permission overwrites deleted from both restricted channels.\n` +
+      `• Winner role removed.`
+    );
+    console.log(`[ADMIN] !unwinner applied to ${targetUser.tag} (${targetId}) by ${message.author.tag}.`);
   }
 });
 
