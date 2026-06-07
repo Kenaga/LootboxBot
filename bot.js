@@ -399,7 +399,23 @@ function startWinnerExpiryPoller(guildId) {
 // ============================================================
 
 const ADDBOUNTY_CHANNEL = '1265305843331497995'; // admin-only channel for !addbounty
-const BOUNTY_COOLDOWN_MS = 6 * 60 * 60 * 1000;  // 6 hours
+/**
+ * Returns the cooldown duration (ms) based on bounty cost:
+ *   0 –   25 coins → 30 minutes
+ *  25 –   75 coins →  1 hour
+ *  75 –  100 coins →  2 hours
+ * 100 –  200 coins →  3 hours
+ * 200 –  500 coins →  4 hours
+ * 500 – 1000 coins →  6 hours
+ */
+function getBountyCooldownMs(cost) {
+  if (cost <=  25) return  30 * 60 * 1000;
+  if (cost <=  75) return   1 * 60 * 60 * 1000;
+  if (cost <= 100) return   2 * 60 * 60 * 1000;
+  if (cost <= 200) return   3 * 60 * 60 * 1000;
+  if (cost <= 500) return   4 * 60 * 60 * 1000;
+  return                    6 * 60 * 60 * 1000;
+}
 
 // In-memory bounty state
 const activeBountyHunters = new Map(); // userId   -> { bountyId, stage, channelId }
@@ -2152,7 +2168,7 @@ client.on('messageCreate', async (message) => {
       if (!stillExists) {
         activeBountyHunters.delete(userId);
         bountiesBeingHunted.get(bountyId)?.delete(userId);
-        const coolExp = Date.now() + BOUNTY_COOLDOWN_MS;
+        const coolExp = Date.now() + getBountyCooldownMs(bounty.cost);
         bountyCooldowns.set(userId, coolExp);
         message.channel.send(
           `<@${userId}> \uD83D\uDCA8 You arrived at the location, but **${bounty.name}** has already been brought in by another hunter. You're on cooldown until <t:${Math.floor(coolExp / 1000)}:R>.`
@@ -2196,7 +2212,7 @@ client.on('messageCreate', async (message) => {
     if (!bounty) {
       activeBountyHunters.delete(userId);
       bountiesBeingHunted.get(hunt.bountyId)?.delete(userId);
-      const coolExp = Date.now() + BOUNTY_COOLDOWN_MS;
+      const coolExp = Date.now() + getBountyCooldownMs(bounty.cost);
       bountyCooldowns.set(userId, coolExp);
       message.reply(`\uD83D\uDCA8 Your target was already brought in by another hunter. You're on cooldown until <t:${Math.floor(coolExp / 1000)}:R>.`);
       return;
@@ -2250,11 +2266,11 @@ client.on('messageCreate', async (message) => {
     activeBountyHunters.delete(userId);
     bountiesBeingHunted.get(hunt.bountyId)?.delete(userId);
 
-    // Apply 6-hour cooldown (admin is immune)
+    // Apply tiered cooldown based on bounty cost (admin is immune)
     const isAdmin = userId === ADMIN_USER_ID;
     let coolSec = null;
     if (!isAdmin) {
-      const cooldownExpiry = Date.now() + BOUNTY_COOLDOWN_MS;
+      const cooldownExpiry = Date.now() + getBountyCooldownMs(bounty.cost);
       bountyCooldowns.set(userId, cooldownExpiry);
       coolSec = Math.floor(cooldownExpiry / 1000);
     }
@@ -2317,6 +2333,76 @@ client.on('messageCreate', async (message) => {
         `${cooldownLine}`
       );
     }
+  }
+
+  // !commands — show all available commands
+  if (message.content.toLowerCase() === '!commands') {
+    const isAdmin = message.author.id === ADMIN_USER_ID;
+
+    const userCommands =
+      `📋 **BOT COMMANDS**\n\n` +
+
+      `**🎁 Lootbox**\n` +
+      `\`!lootbox\` — Open a lootbox and win coins or rare items\n\n` +
+
+      `**🪙 Economy**\n` +
+      `\`!coins\` — Check your coin balance\n` +
+      `\`!gambit\` — Buy the Gambit (VIP) role for 100 coins (lasts 5 days)\n\n` +
+
+      `**🃏 Blackjack**\n` +
+      `\`!blackjack <bet>\` — Start a blackjack game\n` +
+      `\`!hit\` — Draw another card\n` +
+      `\`!stand\` — Hold your hand and let the dealer play\n\n` +
+
+      `**🛒 Market**\n` +
+      `\`!market\` — Browse available items (colors & badges)\n` +
+      `\`!buy <id>\` — Purchase an item from the market\n` +
+      `\`!inventory\` — View your owned items\n` +
+      `\`!equip <id>\` — Equip a color or badge\n` +
+      `\`!unequip <id>\` — Unequip a color or badge\n\n` +
+
+      `**🚂 Train Heist**\n` +
+      `\`!rob\` — Attempt to rob the active train (20% success)\n\n` +
+
+      `**⚔️ Duels**\n` +
+      `\`!duel @user <amount>\` — Challenge someone to a coin duel\n` +
+      `\`!accept\` — Accept a duel challenge\n\n` +
+
+      `**🤠 Bounty Hunter**\n` +
+      `\`!bounty\` — List all active bounties\n` +
+      `\`!bounty <id>\` — Start hunting a bounty\n` +
+      `\`!eagleeye\` — Search for the target at the location\n` +
+      `\`!catch\` — Bring the target in alive (full reward)\n` +
+      `\`!kill\` — Take the target down (reduced reward on alive-only bounties)\n\n` +
+
+      `**🏆 Achievements**\n` +
+      `\`!achievements\` — View your achievement progress\n\n` +
+
+      `**ℹ️ Help**\n` +
+      `\`!commands\` — Show this command list`;
+
+    const adminCommands =
+      `\n\n━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `**🔐 ADMIN COMMANDS**\n\n` +
+
+      `**💰 Coins**\n` +
+      `\`!givecoin @user <amount>\` — Give coins to a user\n` +
+      `\`!coingiveaway <amount> @user1 @user2 ...\` — Split coins randomly among users\n` +
+      `\`!leaderboard\` — Show the top 5 coin holders\n` +
+      `\`!resetblues\` — Reset all users' blue counts and blue achievements\n\n` +
+
+      `**🚂 Train**\n` +
+      `\`!train\` — Start a train heist event\n` +
+      `\`!stoptrain\` — Stop the active train heist\n\n` +
+
+      `**🤠 Bounties**\n` +
+      `\`!addbounty <name> <cost> <deadoralive/alive>\` — Post a new bounty\n\n` +
+
+      `**🏅 Winner**\n` +
+      `\`!winner @user\` — Apply winner restrictions (45 days)\n` +
+      `\`!unwinner @user\` — Remove winner restrictions early`;
+
+    message.reply(userCommands + (isAdmin ? adminCommands : ''));
   }
 });
 
