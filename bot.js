@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, ActivityType } = require('discord.js');
 const mongoose = require('mongoose');
 
 const client = new Client({
@@ -2542,9 +2542,62 @@ client.on('messageCreate', async (message) => {
 
       `**🔒 Channel Ban**\n` +
       `\`!channelban @user #channel\` — Permanently ban a user from seeing a channel (survives leave/rejoin)\n` +
-      `\`!channelunban @user #channel\` — Remove a channel ban`;
+      `\`!channelunban @user #channel\` — Remove a channel ban\n\n` +
+
+      `**🎮 Bot Status**\n` +
+      `\`!status <type> <text>\` — Change the bot's status\n` +
+      `Types: \`playing\`, \`streaming\`, \`listeningto\`, \`watching\`, \`competing\``;
 
     message.reply(userCommands + (isAdmin ? adminCommands : ''));
+  }
+
+  // !status command (admin only) — change the bot's presence
+  if (message.content.toLowerCase().startsWith('!status')) {
+    if (message.author.id !== ADMIN_USER_ID) return;
+
+    const args = message.content.trim().split(/\s+/);
+    // args[0] = '!status', args[1] = type keyword, args[2..] = status text
+    if (args.length < 3) {
+      return message.reply(
+        'Usage: `!status <type> <text>`\n' +
+        'Types: `playing`, `streaming`, `listeningto`, `watching`, `competing`\n' +
+        'Example: `!status playing Blackjack`'
+      );
+    }
+
+    const typeKeyword = args[1].toLowerCase();
+    const statusText  = args.slice(2).join(' ');
+
+    const typeMap = {
+      playing:     ActivityType.Playing,
+      streaming:   ActivityType.Streaming,
+      listeningto: ActivityType.Listening,
+      watching:    ActivityType.Watching,
+      competing:   ActivityType.Competing,
+    };
+
+    if (!typeMap.hasOwnProperty(typeKeyword)) {
+      return message.reply(
+        `Unknown type \`${typeKeyword}\`. Valid types: \`playing\`, \`streaming\`, \`listeningto\`, \`watching\`, \`competing\``
+      );
+    }
+
+    const activityType = typeMap[typeKeyword];
+
+    client.user.setPresence({
+      activities: [{ name: statusText, type: activityType }],
+      status: 'online',
+    });
+
+    const friendlyNames = {
+      playing:     'Playing',
+      streaming:   'Streaming',
+      listeningto: 'Listening to',
+      watching:    'Watching',
+      competing:   'Competing in',
+    };
+
+    message.reply(`✅ Status updated to **${friendlyNames[typeKeyword]} ${statusText}**!`);
   }
 });
 
