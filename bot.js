@@ -53,6 +53,14 @@ const winnerRecordSchema = new mongoose.Schema({
 });
 const WinnerRecord = mongoose.model('WinnerRecord', winnerRecordSchema);
 
+// Channel ban schema — persists per-user View Channel denies so bans survive leave/rejoin
+const channelBanSchema = new mongoose.Schema({
+  userId:    { type: String, required: true },
+  channelId: { type: String, required: true },
+}, { indexes: [{ unique: true, fields: ['userId', 'channelId'] }] });
+channelBanSchema.index({ userId: 1, channelId: 1 }, { unique: true });
+const ChannelBan = mongoose.model('ChannelBan', channelBanSchema);
+
 // Bounty schema
 const bountySchema = new mongoose.Schema({
   bountyId:  { type: String, required: true, unique: true },
@@ -392,6 +400,42 @@ function startWinnerExpiryPoller(guildId) {
   // Then run every hour
   setInterval(checkExpiredWinners, CHECK_INTERVAL_MS);
   console.log('[Winner] Expiry poller started (checks every hour).');
+}
+
+// ============================================================
+// CHANNEL BAN SYSTEM
+// ============================================================
+
+/**
+ * Deny "View Channel" for userId on a specific channel.
+ * Uses a per-user permission overwrite, so it persists across leave/rejoin.
+ */
+async function applyChannelBan(guild, userId, channelId) {
+  try {
+    const channel = await guild.channels.fetch(channelId);
+    if (!channel) return false;
+    await channel.permissionOverwrites.edit(userId, { ViewChannel: false });
+    return true;
+  } catch (err) {
+    console.error(`[ChannelBan] Error applying ban for ${userId} on ${channelId}:`, err);
+    return false;
+  }
+}
+
+/**
+ * Remove the View Channel deny overwrite for userId on a specific channel.
+ */
+async function removeChannelBan(guild, userId, channelId) {
+  try {
+    const channel = await guild.channels.fetch(channelId);
+    if (!channel) return false;
+    const overwrite = channel.permissionOverwrites.cache.get(userId);
+    if (overwrite) await overwrite.delete();
+    return true;
+  } catch (err) {
+    console.error(`[ChannelBan] Error removing ban for ${userId} on ${channelId}:`, err);
+    return false;
+  }
 }
 
 // ============================================================
@@ -905,6 +949,21 @@ client.on('ready', async () => {
     }
   } catch (error) {
     console.error('Error loading users from database:', error);
+  }
+});
+
+// Re-apply channel bans when a banned user rejoins the server
+client.on('guildMemberAdd', async (member) => {
+  try {
+    const bans = await ChannelBan.find({ userId: member.id });
+    if (bans.length === 0) return;
+
+    for (const ban of bans) {
+      await applyChannelBan(member.guild, member.id, ban.channelId);
+      console.log(`[ChannelBan] Re-applied ban for rejoined user ${member.id} on channel ${ban.channelId}`);
+    }
+  } catch (err) {
+    console.error('[ChannelBan] Error re-applying bans on member join:', err);
   }
 });
 
@@ -2029,6 +2088,85 @@ client.on('messageCreate', async (message) => {
     console.log(`[ADMIN] !unwinner applied to ${targetUser.tag} (${targetId}) by ${message.author.tag}.`);
   }
 
+  // !channelban @user #channel — admin only
+  // Denies "View Channel" for the user on the specified channel and persists it to DB
+  // so the ban survives the user leaving and rejoining the server.
+  if (message.content.toLowerCase().startsWith('!channelban')) {
+    if (message.author.id !== ADMIN_USER_ID) return;
+
+    const targetUser    = message.mentions.users.first();
+    const targetChannel = message.mentions.channels.first();
+
+    if (!targetUser || !targetChannel) {
+      message.reply('Usage: `!channelban @user #channel`');
+      return;
+    }
+
+    const targetId    = targetUser.id;
+    const channelId   = targetChannel.id;
+
+    // Check if already banned
+    const existing = await ChannelBan.findOne({ userId: targetId, channelId });
+    if (existing) {
+      message.reply(`⚠️ ${targetUser} is already channel-banned from <#${channelId}>.`);
+      return;
+    }
+
+    // Apply the Discord permission overwrite
+    const success = await applyChannelBan(message.guild, targetId, channelId);
+    if (!success) {
+      message.reply(`❌ Failed to apply the channel ban. Make sure I have **Manage Channel** permissions on <#${channelId}>.`);
+      return;
+    }
+
+    // Persist to database so the ban survives leave/rejoin
+    await ChannelBan.create({ userId: targetId, channelId });
+
+    message.reply(
+      `🔒 ${targetUser} has been **channel-banned** from <#${channelId}>.\n` +
+      `• They can no longer see that channel.\n` +
+      `• The ban will persist even if they leave and rejoin the server.\n` +
+      `• Use \`!channelunban @user #channel\` to lift it.`
+    );
+    console.log(`[ChannelBan] ${targetUser.tag} (${targetId}) banned from channel ${channelId} by ${message.author.tag}`);
+  }
+
+  // !channelunban @user #channel — admin only
+  // Removes the View Channel deny overwrite and deletes the DB record.
+  if (message.content.toLowerCase().startsWith('!channelunban')) {
+    if (message.author.id !== ADMIN_USER_ID) return;
+
+    const targetUser    = message.mentions.users.first();
+    const targetChannel = message.mentions.channels.first();
+
+    if (!targetUser || !targetChannel) {
+      message.reply('Usage: `!channelunban @user #channel`');
+      return;
+    }
+
+    const targetId  = targetUser.id;
+    const channelId = targetChannel.id;
+
+    // Check if the ban record actually exists
+    const existing = await ChannelBan.findOne({ userId: targetId, channelId });
+    if (!existing) {
+      message.reply(`⚠️ ${targetUser} doesn't have a channel ban on <#${channelId}>.`);
+      return;
+    }
+
+    // Remove the Discord permission overwrite
+    await removeChannelBan(message.guild, targetId, channelId);
+
+    // Remove from database
+    await ChannelBan.deleteOne({ userId: targetId, channelId });
+
+    message.reply(
+      `🔓 ${targetUser}'s channel ban on <#${channelId}> has been **removed**.\n` +
+      `• They can now see the channel again (subject to their roles' permissions).`
+    );
+    console.log(`[ChannelBan] ${targetUser.tag} (${targetId}) unbanned from channel ${channelId} by ${message.author.tag}`);
+  }
+
   // ============================================================
   // BOUNTY COMMANDS
   // ============================================================
@@ -2400,7 +2538,11 @@ client.on('messageCreate', async (message) => {
 
       `**🏅 Winner**\n` +
       `\`!winner @user\` — Apply winner restrictions (45 days)\n` +
-      `\`!unwinner @user\` — Remove winner restrictions early`;
+      `\`!unwinner @user\` — Remove winner restrictions early\n\n` +
+
+      `**🔒 Channel Ban**\n` +
+      `\`!channelban @user #channel\` — Permanently ban a user from seeing a channel (survives leave/rejoin)\n` +
+      `\`!channelunban @user #channel\` — Remove a channel ban`;
 
     message.reply(userCommands + (isAdmin ? adminCommands : ''));
   }
