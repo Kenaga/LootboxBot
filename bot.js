@@ -507,14 +507,16 @@ function randomQuote(arr) {
  */
 function getBountyWinChance(cost, bountyType, action) {
   if (bountyType === 'deadoralive') {
-    if (cost <= 25)  return 50;
-    if (cost <= 75)  return 30;
-    if (cost <= 100) return 15;
-    if (cost <= 200) return 8;
-    if (cost <= 500) return 3;
-    return 1;
+    // Same odds for both !kill and !catch on dead-or-alive bounties
+    if (cost <= 25)  return 45;
+    if (cost <= 75)  return 20;
+    if (cost <= 100) return 10;
+    if (cost <= 200) return 5;
+    if (cost <= 500) return 0.1;
+    return 0.05;
   }
   if (action === 'kill') {
+    // Alive bounty — !kill odds
     if (cost <= 25)  return 70;
     if (cost <= 75)  return 50;
     if (cost <= 100) return 35;
@@ -522,13 +524,13 @@ function getBountyWinChance(cost, bountyType, action) {
     if (cost <= 500) return 5;
     return 1;
   }
-  // alive + catch
-  if (cost <= 25)  return 60;
-  if (cost <= 75)  return 45;
-  if (cost <= 100) return 20;
-  if (cost <= 200) return 8;
-  if (cost <= 500) return 3;
-  return 1;
+  // Alive bounty — !catch odds
+  if (cost <= 25)  return 40;
+  if (cost <= 75)  return 15;
+  if (cost <= 100) return 5;
+  if (cost <= 200) return 1;
+  if (cost <= 500) return 0.08;
+  return 0.03;
 }
 
 // Achievement system
