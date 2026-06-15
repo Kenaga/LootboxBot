@@ -41,7 +41,8 @@ const userSchema = new mongoose.Schema({
     bountiesHunted:       { type: Number, default: 0 },
     legendaryBounty:      { type: Number, default: 0 },
   },
-  unlockedAchievements: { type: [String], default: [] }
+  unlockedAchievements: { type: [String], default: [] },
+  bossRoleExpiresAt:    { type: Number, default: null },
 });
 
 const User = mongoose.model('User', userSchema);
@@ -163,6 +164,31 @@ async function removeRoleExpiration(userId) {
   }
 }
 
+// Save boss role expiration to database
+async function saveBossRoleExpiration(userId, expiresAt) {
+  try {
+    await User.findOneAndUpdate(
+      { userId },
+      { bossRoleExpiresAt: expiresAt },
+      { upsert: true, new: true }
+    );
+  } catch (error) {
+    console.error('Error saving boss role expiration:', error);
+  }
+}
+
+// Remove boss role expiration from database
+async function removeBossRoleExpiration(userId) {
+  try {
+    await User.findOneAndUpdate(
+      { userId },
+      { bossRoleExpiresAt: null }
+    );
+  } catch (error) {
+    console.error('Error removing boss role expiration:', error);
+  }
+}
+
 // Split total coins randomly among recipients (each gets at least 1, sums exactly to total)
 function splitCoinsRandomly(total, recipientCount) {
   if (recipientCount <= 0) return [];
@@ -215,12 +241,41 @@ const vipLootboxItems = [
   { message: 'Mavi <:blue:1479814519994974208>', type: 'blue', probability: 12.4678875 },
   { message: 'Blau <:blue:1479814519994974208>', type: 'blue', probability: 12.4678875 },
   { message: 'Bleu <:blue:1479814519994974208>', type: 'blue', probability: 12.4678875 },
-  { message: 'Blu <:blue:1479814519994974208>', type: 'blue', probability: 12.4678875 },
+  { message: 'Blu <:blue:1479814519994974208>',  type: 'blue', probability: 12.4678875 },
   { message: 'Azul <:blue:1479814519994974208>', type: 'blue', probability: 12.4678875 },
   { message: 'Azul <:blue:1479814519994974208>', type: 'blue', probability: 12.4678875 },
   { message: 'Синий <:blue:1479814519994974208>', type: 'blue', probability: 12.4678875 },
   { message: 'Purple <:purple:1479814559555522745>', type: 'purple', probability: 0.23 },
-  { message: 'Gold <:gold:1479814535220166708>', type: 'gold', probability: 0.027 }
+  { message: 'Gold <:gold:1479814535220166708>',   type: 'gold',   probability: 0.027 }
+];
+
+// Boss Winner lootbox items — all blues replaced with Jeff (regular gold/purple odds)
+const bossLootboxItems = [
+  { message: 'jeff', type: 'jeff', probability: 12.371 },
+  { message: 'jeff', type: 'jeff', probability: 12.371 },
+  { message: 'jeff', type: 'jeff', probability: 12.371 },
+  { message: 'jeff', type: 'jeff', probability: 12.371 },
+  { message: 'jeff', type: 'jeff', probability: 12.371 },
+  { message: 'jeff', type: 'jeff', probability: 12.371 },
+  { message: 'jeff', type: 'jeff', probability: 12.371 },
+  { message: 'jeff', type: 'jeff', probability: 12.371 },
+  { message: 'jeff', type: 'jeff', probability: 1 },
+  { message: 'Purple <:purple:1479814559555522745>', type: 'purple', probability: 0.023 },
+  { message: 'Gold <:gold:1479814535220166708>',   type: 'gold',   probability: 0.009 }
+];
+
+// Boss Winner + Gambit lootbox items — blues replaced with Jeff, Gambit gold/purple odds
+const bossVipLootboxItems = [
+  { message: 'jeff', type: 'jeff', probability: 12.4678875 },
+  { message: 'jeff', type: 'jeff', probability: 12.4678875 },
+  { message: 'jeff', type: 'jeff', probability: 12.4678875 },
+  { message: 'jeff', type: 'jeff', probability: 12.4678875 },
+  { message: 'jeff', type: 'jeff', probability: 12.4678875 },
+  { message: 'jeff', type: 'jeff', probability: 12.4678875 },
+  { message: 'jeff', type: 'jeff', probability: 12.4678875 },
+  { message: 'jeff', type: 'jeff', probability: 12.4678875 },
+  { message: 'Purple <:purple:1479814559555522745>', type: 'purple', probability: 0.23 },
+  { message: 'Gold <:gold:1479814535220166708>',   type: 'gold',   probability: 0.027 }
 ];
 
 // Test lootbox items for admin testing - removed after testing
@@ -267,6 +322,10 @@ function isColorItem(item) {
 
 // VIP Role ID
 const VIP_ROLE_ID = '1472362801992306871';
+
+// Boss Winner Role ID (awarded for winning a boss bounty — lasts 3 days)
+const BOSS_WINNER_ROLE_ID = '1516188872705310750';
+const BOSS_ROLE_DURATION_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
 
 // Channel IDs
 const LOOTBOX_CHANNELS = ['1471881938502418442', '1265305843331497995'];
@@ -693,6 +752,9 @@ const processedMessages = new Set();
 // Track Gambit role expiration timeouts (in-memory for active timers)
 const roleExpirations = new Map();
 
+// Track boss winner role expiration timeouts
+const bossRoleExpirations = new Map();
+
 // Track when bot is removing roles (to avoid triggering manual removal detection)
 const botRemovals = new Set();
 
@@ -815,6 +877,53 @@ async function removeUserRole(userId, guildId) {
   }
 }
 
+// Function to schedule boss winner role removal
+function scheduleBossRoleRemoval(userId, guildId, expiresAt) {
+  const timeLeft = expiresAt - Date.now();
+
+  if (timeLeft <= 0) {
+    removeBossRole(userId, guildId);
+    return;
+  }
+
+  if (bossRoleExpirations.has(userId)) {
+    clearTimeout(bossRoleExpirations.get(userId));
+  }
+
+  const timeout = setTimeout(() => {
+    removeBossRole(userId, guildId);
+  }, timeLeft);
+
+  bossRoleExpirations.set(userId, timeout);
+}
+
+// Function to remove boss winner role and clean up
+async function removeBossRole(userId, guildId) {
+  try {
+    const guild  = await client.guilds.fetch(guildId);
+    const member = await guild.members.fetch(userId).catch(() => null);
+
+    botRemovals.add(`boss_${userId}`);
+    if (member && member.roles.cache.has(BOSS_WINNER_ROLE_ID)) {
+      await member.roles.remove(BOSS_WINNER_ROLE_ID);
+    }
+    setTimeout(() => botRemovals.delete(`boss_${userId}`), 1000);
+
+    await removeBossRoleExpiration(userId);
+    bossRoleExpirations.delete(userId);
+
+    // Notify user
+    const channel = await guild.channels.fetch(ECONOMY_CHANNEL).catch(() => null);
+    if (channel && member) {
+      channel.send(`<@${userId}> Your ⭐ **Boss Winner** lootbox bonus has expired after 3 days.`);
+    }
+
+    console.log(`[BossRole] Removed boss winner role from user ${userId}`);
+  } catch (error) {
+    console.error('[BossRole] Error removing boss role:', error);
+  }
+}
+
 // Function to get a random item based on weighted probabilities
 function getRandomItem(itemsArray) {
   const random = Math.random() * 100;
@@ -873,10 +982,22 @@ async function handleLootboxCommand(message) {
   }
 
   // Check if user has the VIP role
-  const hasVipRole = message.member.roles.cache.has(VIP_ROLE_ID);
+  const hasVipRole  = message.member.roles.cache.has(VIP_ROLE_ID);
+  const hasBossRole = message.member.roles.cache.has(BOSS_WINNER_ROLE_ID);
+
+  // Pick the correct lootbox pool:
+  //   Boss + Gambit  → bossVipLootboxItems  (blues→Jeff, Gambit gold/purple odds)
+  //   Boss only      → bossLootboxItems      (blues→Jeff, normal gold/purple odds)
+  //   Gambit only    → vipLootboxItems       (no Jeff, Gambit gold/purple odds)
+  //   Default        → lootboxItems
+  let pool;
+  if (hasBossRole && hasVipRole)  pool = bossVipLootboxItems;
+  else if (hasBossRole)           pool = bossLootboxItems;
+  else if (hasVipRole)            pool = vipLootboxItems;
+  else                            pool = lootboxItems;
 
   // Get 1 random item based on role
-  const item = hasVipRole ? getRandomItem(vipLootboxItems) : getRandomItem(lootboxItems);
+  const item = getRandomItem(pool);
 
   // Award coins (1 coin for Blue, 10 coins for Jeff)
   if (item.type === 'blue') {
@@ -944,6 +1065,19 @@ client.on('ready', async () => {
     
     console.log(`📊 Loaded ${userCoins.size} users with coins`);
     console.log(`⏰ Restored ${roleExpirationsData.size} role expiration timers`);
+
+    // Restore boss winner role expiration timers
+    let bossTimersRestored = 0;
+    for (const user of users) {
+      if (user.bossRoleExpiresAt) {
+        const guildId = client.guilds.cache.first()?.id;
+        if (guildId) {
+          scheduleBossRoleRemoval(user.userId, guildId, user.bossRoleExpiresAt);
+          bossTimersRestored++;
+        }
+      }
+    }
+    console.log(`⭐ Restored ${bossTimersRestored} boss role expiration timers`);
 
     // Start the hourly poller that checks for expired winner records.
     // (We use a poller instead of per-user setTimeout because 45 days exceeds
@@ -2586,6 +2720,25 @@ client.on('messageCreate', async (message) => {
       }
       checkAndAwardAchievements(userId).catch(err => console.error('Error checking bounty achievements:', err));
       console.log(`[Bounty] ${userId} ${action}ed #${hunt.bountyId} "${bounty.name}" — earned ${reward} coins.`);
+
+      // Boss bounty win: award the Boss Winner role for 3 days
+      if (bounty.isBoss) {
+        try {
+          const guild  = message.guild;
+          const member = await guild.members.fetch(userId).catch(() => null);
+          if (member) {
+            await member.roles.add(BOSS_WINNER_ROLE_ID);
+            const expiresAt = Date.now() + BOSS_ROLE_DURATION_MS;
+            await saveBossRoleExpiration(userId, expiresAt);
+            scheduleBossRoleRemoval(userId, guild.id, expiresAt);
+            message.channel.send(
+              `⭐ <@${userId}> You defeated a boss bounty! You have been granted the **Boss Winner** role for **3 days** — your lootbox odds are supercharged! (Blues are now all Jeff!)`
+            ).catch(() => {});
+          }
+        } catch (err) {
+          console.error('[BossRole] Error giving boss winner role:', err);
+        }
+      }
     } else {
       const quote = action === 'catch' ? randomQuote(QUOTES_FAIL_ALIVE) : randomQuote(QUOTES_FAIL_DEAD);
 
@@ -2807,42 +2960,45 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-// Detect when Gambit role is manually removed by admin
+// Detect when Gambit or Boss Winner role is manually removed by admin
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
   try {
-    // Check if Gambit role was removed
-    const hadRole = oldMember.roles.cache.has(VIP_ROLE_ID);
-    const hasRole = newMember.roles.cache.has(VIP_ROLE_ID);
-    
-    // If role was removed
-    if (hadRole && !hasRole) {
+    // --- Gambit role ---
+    const hadVip = oldMember.roles.cache.has(VIP_ROLE_ID);
+    const hasVip = newMember.roles.cache.has(VIP_ROLE_ID);
+
+    if (hadVip && !hasVip) {
       const userId = newMember.id;
-      
-      // Check if this was a bot removal (automated expiration)
-      if (botRemovals.has(userId)) {
-        return; // This was the bot removing it, don't notify
-      }
-      
-      // This was a manual removal by an admin
+      if (botRemovals.has(userId)) return;
+
       console.log(`Gambit role manually removed from user ${userId}`);
-      
-      // Clear the expiration timer
       if (roleExpirations.has(userId)) {
         clearTimeout(roleExpirations.get(userId));
         roleExpirations.delete(userId);
       }
-      
-      // Remove from database
       await removeRoleExpiration(userId);
-      
-      // Notify the user in economy channel
+
       const channel = await newMember.guild.channels.fetch(ECONOMY_CHANNEL);
-      if (channel) {
-        channel.send(`<@${userId}> Your **Gambit** role has been removed by an admin.`);
-      }
+      if (channel) channel.send(`<@${userId}> Your **Gambit** role has been removed by an admin.`);
     }
 
-    // Check if user removed their server boost
+    // --- Boss Winner role ---
+    const hadBoss = oldMember.roles.cache.has(BOSS_WINNER_ROLE_ID);
+    const hasBoss = newMember.roles.cache.has(BOSS_WINNER_ROLE_ID);
+
+    if (hadBoss && !hasBoss) {
+      const userId = newMember.id;
+      if (botRemovals.has(`boss_${userId}`)) return;
+
+      console.log(`[BossRole] Boss Winner role manually removed from user ${userId}`);
+      if (bossRoleExpirations.has(userId)) {
+        clearTimeout(bossRoleExpirations.get(userId));
+        bossRoleExpirations.delete(userId);
+      }
+      await removeBossRoleExpiration(userId);
+    }
+
+    // --- Server boost removed ---
     const wasBosting = oldMember.premiumSince !== null;
     const isBoosting = newMember.premiumSince !== null;
 
