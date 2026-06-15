@@ -67,6 +67,7 @@ const bountySchema = new mongoose.Schema({
   name:      { type: String, required: true },
   cost:      { type: Number, required: true },
   type:      { type: String, enum: ['deadoralive', 'alive'], required: true },
+  isBoss:    { type: Boolean, default: false },
   createdAt: { type: Number, default: () => Date.now() },
 });
 const Bounty = mongoose.model('Bounty', bountySchema);
@@ -677,6 +678,8 @@ function getAchievementProgress(userId) {
 // Train robbery
 const TRAIN_CHANNELS = ['1506260153551552512', '1265305843331497995'];
 const TRAIN_DURATION_MS = 30 * 60 * 1000;
+const BOSS_TRAIN_DURATION_MS = 60 * 60 * 1000; // 1 hour
+const BOSS_TRAIN_COINS = 1000;
 const TRAIN_COIN_POOLS = [200, 250, 300, 350, 400, 500];
 
 const robOutcomes = [
@@ -1731,6 +1734,41 @@ client.on('messageCreate', async (message) => {
     message.reply('Train heist stopped.');
   }
 
+  // Boss train command (admin only) — 1-hour train with arrest risk
+  if (message.content.toLowerCase() === '!bosstrain') {
+    if (!TRAIN_CHANNELS.includes(message.channel.id)) return;
+    if (message.author.id !== ADMIN_USER_ID) return;
+
+    if (activeTrain) {
+      message.reply('A train is already at the station! Wait for it to leave before starting another heist.');
+      return;
+    }
+
+    const channelId = message.channel.id;
+
+    const timeoutId = setTimeout(() => {
+      endTrain('timeout').catch(err => console.error('Error ending boss train:', err));
+    }, BOSS_TRAIN_DURATION_MS);
+
+    activeTrain = {
+      type: 'boss',
+      channelId,
+      timeoutId,
+      coinsRemaining: BOSS_TRAIN_COINS,
+      robbers: new Set(),
+      arrested: new Set(),
+    };
+
+    message.reply(
+      `⚠️ 🚂 **BOSS TRAIN INCOMING!** ⚠️\n\n` +
+      `A heavily guarded train is passing through! Type **!rob** to attempt a robbery.\n\n` +
+      `💰 This train is carrying **${BOSS_TRAIN_COINS}** coins!\n` +
+      `⚡ Successful robberies yield **1–20 coins**.\n` +
+      `🚔 **Warning:** There is a **5% chance of getting arrested** on each attempt. Arrested outlaws cannot rob this train!\n` +
+      `⏰ The train will leave in **1 hour**.`
+    );
+  }
+
   // Rob command — attempt to rob the active train
   if (message.content.toLowerCase() === '!rob') {
     if (!TRAIN_CHANNELS.includes(message.channel.id)) return;
@@ -1746,6 +1784,24 @@ client.on('messageCreate', async (message) => {
     }
 
     const userId = message.author.id;
+    const isBossTrain = activeTrain.type === 'boss';
+
+    // Boss train: block arrested users
+    if (isBossTrain && activeTrain.arrested.has(userId)) {
+      message.reply('🚔 You have been arrested! You cannot rob this train and must wait for the next one.');
+      return;
+    }
+
+    // Boss train: 5% arrest chance before the robbery attempt
+    if (isBossTrain && Math.random() < 0.05) {
+      activeTrain.arrested.add(userId);
+      message.reply(
+        '🚔 **ARRESTED!** The sheriff caught you scouting the train! ' +
+        'You have been arrested and cannot rob this train. Wait for the next one!'
+      );
+      return;
+    }
+
     const outcome = getRandomItem(robOutcomes);
 
     if (outcome.type === 'fail') {
@@ -1753,8 +1809,10 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
+    // Boss train gives 1–20 coins, normal train gives 1–10 coins
+    const maxCoins = isBossTrain ? 20 : 10;
     const coinsWon = Math.min(
-      Math.floor(Math.random() * 10) + 1,
+      Math.floor(Math.random() * maxCoins) + 1,
       activeTrain.coinsRemaining
     );
     activeTrain.coinsRemaining -= coinsWon;
@@ -2174,7 +2232,7 @@ client.on('messageCreate', async (message) => {
   // ============================================================
 
   // !addbounty <name> <cost> <deadoralive|alive>  (admin only, specific channel)
-  if (message.content.toLowerCase().startsWith('!addbounty')) {
+  if (message.content.toLowerCase().startsWith('!addbounty') && !message.content.toLowerCase().startsWith('!addbossbounty')) {
     if (message.channel.id !== ADDBOUNTY_CHANNEL) return;
     if (message.author.id !== ADMIN_USER_ID) return;
 
@@ -2216,7 +2274,7 @@ client.on('messageCreate', async (message) => {
       bountyId = String(Math.floor(Math.random() * 90) + 10);
     } while (usedIds.has(bountyId));
 
-    await Bounty.create({ bountyId, name: bountyName, cost: costArg, type: typeArg });
+    await Bounty.create({ bountyId, name: bountyName, cost: costArg, type: typeArg, isBoss: false });
 
     const typeLabel = typeArg === 'deadoralive' ? 'Dead or Alive' : 'Alive Only';
     message.reply(
@@ -2228,6 +2286,64 @@ client.on('messageCreate', async (message) => {
       `Use \`!bounty ${bountyId}\` to start hunting!`
     );
     console.log(`[ADMIN] Bounty #${bountyId} added: "${bountyName}" (${costArg} coins, ${typeArg}) by ${message.author.tag}`);
+  }
+
+  // !addbossbounty <name> <cost> <deadoralive|alive>  (admin only) — steals coins on failure
+  if (message.content.toLowerCase().startsWith('!addbossbounty')) {
+    if (message.channel.id !== ADDBOUNTY_CHANNEL) return;
+    if (message.author.id !== ADMIN_USER_ID) return;
+
+    const args = message.content.trim().split(/\s+/);
+    // Structure: !addbossbounty [name words...] <cost> <type>
+    if (args.length < 4) {
+      message.reply('Usage: `!addbossbounty <name> <bountycost> <deadoralive/alive>`\nExample: `!addbossbounty El Diablo 300 deadoralive`');
+      return;
+    }
+
+    const typeArg = args[args.length - 1].toLowerCase();
+    if (typeArg !== 'deadoralive' && typeArg !== 'alive') {
+      message.reply('\u274C Bounty type must be `deadoralive` or `alive`.');
+      return;
+    }
+
+    const costArg = parseInt(args[args.length - 2], 10);
+    if (isNaN(costArg) || costArg <= 0 || costArg > 1000) {
+      message.reply('\u274C Bounty cost must be a positive number between 1 and 1000.');
+      return;
+    }
+
+    const nameParts = args.slice(1, args.length - 2);
+    if (nameParts.length < 1) {
+      message.reply('Usage: `!addbossbounty <name> <bountycost> <deadoralive/alive>`');
+      return;
+    }
+    const bountyName = nameParts.join(' ');
+
+    // Generate unique random 2-digit ID (10–99)
+    const existingBounties = await Bounty.find({}, 'bountyId');
+    const usedIds = new Set(existingBounties.map(b => b.bountyId));
+    if (usedIds.size >= 90) {
+      message.reply('\u274C All 2-digit bounty IDs are in use (90 max). Remove some bounties first.');
+      return;
+    }
+    let bountyId;
+    do {
+      bountyId = String(Math.floor(Math.random() * 90) + 10);
+    } while (usedIds.has(bountyId));
+
+    await Bounty.create({ bountyId, name: bountyName, cost: costArg, type: typeArg, isBoss: true });
+
+    const typeLabel = typeArg === 'deadoralive' ? 'Dead or Alive' : 'Alive Only';
+    message.reply(
+      `⭐ **New BOSS Bounty Posted!** ⭐\n\n` +
+      `**ID:** \`${bountyId}\`\n` +
+      `**Name:** ${bountyName}\n` +
+      `**Reward:** ${costArg} coins 🪙\n` +
+      `**Type:** ${typeLabel}\n\n` +
+      `⚠️ **WARNING:** This is a boss bounty! Hunters who fail will lose **1–30 coins**!\n\n` +
+      `Use \`!bounty ${bountyId}\` to start hunting!`
+    );
+    console.log(`[ADMIN] BOSS Bounty #${bountyId} added: "${bountyName}" (${costArg} coins, ${typeArg}) by ${message.author.tag}`);
   }
 
   // !bounty — list all bounties
@@ -2249,9 +2365,11 @@ client.on('messageCreate', async (message) => {
       for (const b of bounties) {
         const typeLabel   = b.type === 'deadoralive' ? 'Dead or Alive' : 'Alive Only';
         const huntingTag  = (bountiesBeingHunted.get(b.bountyId)?.size ?? 0) > 0 ? ' \uD83D\uDD0D *(being hunted)*' : '';
-        text += `**[${b.bountyId}]** ${b.name} — **${b.cost} coins** — ${typeLabel}${huntingTag}\n`;
+        const bossTag     = b.isBoss ? '⭐ ' : '';
+        text += `**[${b.bountyId}]** ${bossTag}${b.name} — **${b.cost} coins** — ${typeLabel}${huntingTag}\n`;
       }
       text += '\nUse `!bounty <id>` to start hunting a bounty.';
+      text += '\n\n⭐ = Boss Bounty (failing steals 1–30 coins from you!)';
       message.reply(text);
       return;
     }
@@ -2363,11 +2481,14 @@ client.on('messageCreate', async (message) => {
       const actionLine = bounty.type === 'deadoralive'
         ? 'Use `!kill` or `!catch` to claim the full bounty!'
         : `Use \`!catch\` for the full reward (**${bounty.cost} coins**) or \`!kill\` for a reduced payout (**${Math.floor(bounty.cost / 4)} coins**).`;
+      const bossWarning = bounty.isBoss
+        ? '\n\n⚠️ **BOSS BOUNTY!** If you fail, this outlaw will steal **1–30 coins** from you!'
+        : '';
       message.reply(
-        `\uD83E\uDDFF **Eagle Eye Activated!** You spotted **${bounty.name}** hiding in the shadows!\n\n` +
+        `\uD83E\uDDFF **Eagle Eye Activated!** You spotted **${bounty.isBoss ? '⭐ ' : ''}${bounty.name}** hiding in the shadows!\n\n` +
         `**Bounty:** ${bounty.name}\n` +
         `**Reward:** ${bounty.cost} coins\n` +
-        `**Type:** ${typeLabel}\n\n` +
+        `**Type:** ${typeLabel}${bossWarning}\n\n` +
         actionLine
       );
     } else {
@@ -2467,9 +2588,27 @@ client.on('messageCreate', async (message) => {
       console.log(`[Bounty] ${userId} ${action}ed #${hunt.bountyId} "${bounty.name}" — earned ${reward} coins.`);
     } else {
       const quote = action === 'catch' ? randomQuote(QUOTES_FAIL_ALIVE) : randomQuote(QUOTES_FAIL_DEAD);
+
+      // Boss bounty: steal 1–30 coins from the player on failure
+      let bossStealLine = '';
+      if (bounty.isBoss) {
+        const stolen = Math.floor(Math.random() * 30) + 1;
+        let currentCoins = userCoins.get(userId);
+        if (currentCoins === undefined) {
+          await loadUserData(userId);
+          currentCoins = userCoins.get(userId) || 0;
+        }
+        const actualStolen = Math.min(stolen, currentCoins);
+        const newCoins = currentCoins - actualStolen;
+        userCoins.set(userId, newCoins);
+        saveUserCoins(userId, newCoins).catch(err => console.error('Error saving coins after boss bounty steal:', err));
+        bossStealLine = `\n⭐ **The outlaw fought back and stole ${actualStolen} coins from you!** Balance: **${newCoins} coins**`;
+        console.log(`[BossBounty] ${userId} failed #${hunt.bountyId} "${bounty.name}" — lost ${actualStolen} coins.`);
+      }
+
       message.reply(
         `${quote}\n\n` +
-        `\uD83D\uDCB8 You earned nothing this time.\n` +
+        `\uD83D\uDCB8 You earned nothing this time.${bossStealLine}\n` +
         `${cooldownLine}`
       );
     }
@@ -2533,10 +2672,12 @@ client.on('messageCreate', async (message) => {
 
       `**🚂 Train**\n` +
       `\`!train\` — Start a train heist event\n` +
+      `\`!bosstrain\` — Start a boss train (1000 coins, 1h, 5% arrest risk, 1–20 coins/rob)\n` +
       `\`!stoptrain\` — Stop the active train heist\n\n` +
 
       `**🤠 Bounties**\n` +
-      `\`!addbounty <name> <cost> <deadoralive/alive>\` — Post a new bounty\n\n` +
+      `\`!addbounty <name> <cost> <deadoralive/alive>\` — Post a new bounty\n` +
+      `\`!addbossbounty <name> <cost> <deadoralive/alive>\` — Post a ⭐ boss bounty (steals 1–30 coins on failure)\n\n` +
 
       `**🏅 Winner**\n` +
       `\`!winner @user\` — Apply winner restrictions (45 days)\n` +
