@@ -2863,7 +2863,8 @@ client.on('messageCreate', async (message) => {
       `\`!status <type> <text>\` — Change the bot's status\n` +
       `Types: \`playing\`, \`streaming\`, \`listeningto\`, \`watching\`, \`competing\``;
 
-    message.reply(userCommands + (isAdmin ? adminCommands : ''));
+    await message.reply(userCommands);
+    if (isAdmin) await message.reply(adminCommands.trimStart());
   }
 
   // !status command (admin only) — change the bot's presence
