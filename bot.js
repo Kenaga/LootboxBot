@@ -679,6 +679,25 @@ async function checkAndAwardAchievements(userId) {
     for (const ach of newlyUnlocked) {
       await announceChannel.send(`🏆 <@${userId}> just unlocked **${ach.name}**! 🎉\n> ${ach.description}`);
     }
+
+    // Check if the player has now unlocked ALL achievements
+    if (newUnlockedList.length >= ACHIEVEMENTS.length) {
+      const ALL_ACHIEVEMENTS_ROLE_ID = '1521131904202440744';
+      try {
+        const guild = client.guilds.cache.first();
+        if (guild) {
+          const member = await guild.members.fetch(userId).catch(() => null);
+          if (member && !member.roles.cache.has(ALL_ACHIEVEMENTS_ROLE_ID)) {
+            await member.roles.add(ALL_ACHIEVEMENTS_ROLE_ID);
+            await announceChannel.send(
+              `🎊 <@${userId}> has unlocked **ALL achievements**! 🏅 Incredible work — you've earned the legendary completionist role!`
+            );
+          }
+        }
+      } catch (err) {
+        console.error('[Achievements] Error granting all-achievements role:', err);
+      }
+    }
   } catch (error) {
     console.error('Error checking/awarding achievements:', error);
   }
