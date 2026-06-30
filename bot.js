@@ -680,6 +680,39 @@ async function checkAndAwardAchievements(userId) {
       await announceChannel.send(`🏆 <@${userId}> just unlocked **${ach.name}**! 🎉\n> ${ach.description}`);
     }
 
+    // Check if any achievement CATEGORY is now fully completed and grant its role
+    const CATEGORY_ROLES = [
+      { ids: ['blue1', 'blue2', 'blue3', 'blue4'],                                          roleId: '1521529182729797632', label: '🔵 Blues' },
+      { ids: ['megaColorful', 'colorful', 'scout'],                                          roleId: '1521529179848577196', label: '🛒 Market' },
+      { ids: ['train1', 'train2', 'train3', 'trainCoins1', 'trainCoins2', 'trainCoins3'],   roleId: '1521530306983886879', label: '🚂 Train Heist' },
+      { ids: ['bj1', 'bj2'],                                                                 roleId: '1521529177432654026', label: '🃏 Blackjack' },
+      { ids: ['duel1', 'duel2', 'duelWin'],                                                  roleId: '1521529174685126778', label: '⚔️ Duelist' },
+      { ids: ['jeff1', 'jeff2'],                                                              roleId: '1521529172156223760', label: '<:jeffYay:1394970335178129461> Jeff' },
+      { ids: ['bounty1', 'bounty2', 'bounty3'],                                              roleId: '1521529169337385021', label: '🤠 Bounty Hunter' },
+    ];
+
+    try {
+      const guild = client.guilds.cache.first();
+      if (guild) {
+        const member = await guild.members.fetch(userId).catch(() => null);
+        if (member) {
+          for (const cat of CATEGORY_ROLES) {
+            // Only act if this check run newly completed the category
+            const wasComplete = cat.ids.every(id => unlocked.includes(id));
+            const isNowComplete = cat.ids.every(id => newUnlockedList.includes(id));
+            if (!wasComplete && isNowComplete && !member.roles.cache.has(cat.roleId)) {
+              await member.roles.add(cat.roleId);
+              await announceChannel.send(
+                `🏅 <@${userId}> has completed all **${cat.label}** achievements and earned the category role!`
+              );
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[Achievements] Error granting category role:', err);
+    }
+
     // Check if the player has now unlocked ALL achievements
     if (newUnlockedList.length >= ACHIEVEMENTS.length) {
       const ALL_ACHIEVEMENTS_ROLE_ID = '1521131904202440744';
