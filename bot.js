@@ -2966,15 +2966,18 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
   }
 });
 
-// Age verification - assign role if user types a valid birth year less than 2008
+// Age verification - assign role if user types a valid birth year
+// Tracks users who typed the ambiguous cutoff year and are waiting for dd/mm
+const pendingAgeVerification = new Map(); // userId -> birth year (number)
+
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
   // Spam check channel - auto ban anyone who messages here
   if (message.channel.id === '1494079451087241296') {
     try {
-      await message.member.ban({ 
-        deleteMessageSeconds: 3600, // Delete messages from the previous hour
+      await message.member.ban({
+        deleteMessageSeconds: 3600,
         reason: 'Suspicious or spam account'
       });
       console.log(`Banned user ${message.author.tag} for messaging in spam check channel`);
@@ -2987,25 +2990,71 @@ client.on('messageCreate', async (message) => {
   if (message.channel.id !== '1269762954685976647') return;
 
   const input = message.content.trim();
+  const userId = message.author.id;
 
-  // If not exactly 4 digits, prompt the user
-  if (!/^\d{4}$/.test(input)) {
-    message.channel.send(`${message.author} Please **only** write your **birth year**`);
+  // Calculate the cutoff year dynamically (must be 18+ to get role)
+  const now = new Date();
+  const cutoffYear = now.getFullYear() - 18; // e.g. 2025 - 18 = 2007
+
+  // --- STEP 2: User is waiting to provide dd/mm after typing the cutoff year ---
+  if (pendingAgeVerification.has(userId)) {
+    const birthYear = pendingAgeVerification.get(userId);
+
+    // Validate dd/mm format
+    if (!/^\d{1,2}\/\d{1,2}$/.test(input)) {
+      message.channel.send(`${message.author} Please write your birth **month** and **day** (example 12/04, dd/mm)`);
+      return;
+    }
+
+    const parts = input.split('/');
+    const day   = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+
+    if (day < 1 || day > 31 || month < 1 || month > 12) {
+      message.channel.send(`${message.author} Please write your birth **month** and **day** (example 12/04, dd/mm)`);
+      return;
+    }
+
+    // Build their 18th birthday and compare to today
+    const eighteenthBirthday = new Date(birthYear + 18, month - 1, day);
+    pendingAgeVerification.delete(userId);
+
+    if (now >= eighteenthBirthday) {
+      // They are 18 or older — grant role
+      try {
+        await message.member.roles.add('1265303728668414064');
+      } catch (error) {
+        console.error('Error adding age verification role:', error);
+      }
+    }
+    // If under 18, silently ignore
     return;
   }
 
-  const year = parseInt(input);
+  // --- STEP 1: Expecting a 4-digit year ---
+  if (!/^\d{4}$/.test(input)) {
+    message.channel.send(`${message.author} Please **only** write your **birth year** (example : 2002, not 12/04/2002)`);
+    return;
+  }
 
-  // If year is less than 1926, it's not a valid year
+  const year = parseInt(input, 10);
+
   if (year < 1926) {
     message.channel.send(`${message.author} Please enter a valid year.`);
     return;
   }
 
-  // If year is 2008 or higher, user is under 18 - silently ignore
-  if (year >= 2008) return;
+  // Clearly under 18 — silently ignore
+  if (year > cutoffYear) return;
 
-  // Valid year between 1926-2007, give role
+  // Ambiguous cutoff year — need exact date to decide
+  if (year === cutoffYear) {
+    pendingAgeVerification.set(userId, year);
+    message.channel.send(`${message.author} Please write your birth **month** and **day** (example 12/04, dd/mm)`);
+    return;
+  }
+
+  // Clearly 18+ (born before cutoff year) — grant role
   try {
     await message.member.roles.add('1265303728668414064');
   } catch (error) {
