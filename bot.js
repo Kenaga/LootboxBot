@@ -3002,7 +3002,7 @@ client.on('messageCreate', async (message) => {
 
     // Validate dd/mm format
     if (!/^\d{1,2}\/\d{1,2}$/.test(input)) {
-      message.channel.send(`${message.author} Please write your birth **month** and **day** (example 12/04, dd/mm)`);
+      message.channel.send(`${message.author} Please write your birth **day** and **month** (example 17/04, in dd/mm format)`);
       return;
     }
 
@@ -3011,7 +3011,7 @@ client.on('messageCreate', async (message) => {
     const month = parseInt(parts[1], 10);
 
     if (day < 1 || day > 31 || month < 1 || month > 12) {
-      message.channel.send(`${message.author} Please write your birth **month** and **day** (example 12/04, dd/mm)`);
+      message.channel.send(`${message.author} Please write your birth **day** and **month** (example 17/04, in dd/mm format)`);
       return;
     }
 
@@ -3050,7 +3050,7 @@ client.on('messageCreate', async (message) => {
   // Ambiguous cutoff year — need exact date to decide
   if (year === cutoffYear) {
     pendingAgeVerification.set(userId, year);
-    message.channel.send(`${message.author} Please write your birth **month** and **day** (example 12/04, dd/mm)`);
+    message.channel.send(`${message.author} Please write your birth **day** and **month** (example 17/04, in dd/mm format)`);
     return;
   }
 
