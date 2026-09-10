@@ -503,6 +503,7 @@ async function removeChannelBan(guild, userId, channelId) {
 // ============================================================
 
 const ADDBOUNTY_CHANNEL = '1265305843331497995'; // admin-only channel for !addbounty
+const BOUNTY_DISAPPEARED_CHANNEL = '1474179171843313926';
 /**
  * Returns the cooldown duration (ms) based on bounty cost:
  *   0 –   25 coins → 30 minutes
@@ -2526,10 +2527,47 @@ client.on('messageCreate', async (message) => {
       `**Name:** ${bountyName}\n` +
       `**Reward:** ${costArg} coins 🪙\n` +
       `**Type:** ${typeLabel}\n\n` +
-      `⚠️ **WARNING:** This is a boss bounty! Hunters who fail will lose **1–30 coins**!\n\n` +
+      `⚠️ **WARNING:** This is a boss bounty! Hunters who fail will lose **1–15 coins**!\n\n` +
       `Use \`!bounty ${bountyId}\` to start hunting!`
     );
     console.log(`[ADMIN] BOSS Bounty #${bountyId} added: "${bountyName}" (${costArg} coins, ${typeArg}) by ${message.author.tag}`);
+  }
+
+  // !deletebounty <id>  (admin only, specific channel)
+  if (/^!deletebounty(?:\s|$)/i.test(message.content)) {
+    if (message.channel.id !== ADDBOUNTY_CHANNEL) return;
+    if (message.author.id !== ADMIN_USER_ID) return;
+
+    const args = message.content.trim().split(/\s+/);
+    if (args.length !== 2) {
+      await message.reply('Usage: `!deletebounty <id>`');
+      return;
+    }
+
+    const bountyId = args[1];
+    const bounty = await Bounty.findOne({ bountyId });
+    if (!bounty) {
+      await message.reply(`❌ No bounty found with ID \`${bountyId}\`.`);
+      return;
+    }
+
+    await Bounty.deleteOne({ bountyId });
+    bountiesBeingHunted.delete(bountyId);
+
+    for (const [hunterId, hunt] of activeBountyHunters) {
+      if (hunt.bountyId === bountyId) activeBountyHunters.delete(hunterId);
+    }
+
+    const announcementChannel = await client.channels.fetch(BOUNTY_DISAPPEARED_CHANNEL).catch(() => null);
+    if (!announcementChannel || !announcementChannel.isTextBased()) {
+      console.error(`[ADMIN] Bounty #${bountyId} deleted, but announcement channel ${BOUNTY_DISAPPEARED_CHANNEL} was unavailable.`);
+      await message.reply(`✅ **${bounty.name}** was deleted, but I couldn't send the disappearance announcement.`);
+      return;
+    }
+
+    await announcementChannel.send(`${bounty.name} disappeared! Forever gone, and can't be hunted down anymore.`);
+    await message.reply(`✅ **${bounty.name}** was deleted.`);
+    console.log(`[ADMIN] Bounty #${bountyId} deleted: "${bounty.name}" by ${message.author.tag}`);
   }
 
   // !bounty — list all bounties
@@ -2555,7 +2593,7 @@ client.on('messageCreate', async (message) => {
         text += `**[${b.bountyId}]** ${bossTag}${b.name} — **${b.cost} coins** — ${typeLabel}${huntingTag}\n`;
       }
       text += '\nUse `!bounty <id>` to start hunting a bounty.';
-      text += '\n\n⭐ = Boss Bounty (failing steals 1–30 coins from you!)';
+      text += '\n\n⭐ = Boss Bounty (failing steals 1–15 coins from you!)';
       message.reply(text);
       return;
     }
@@ -2668,7 +2706,7 @@ client.on('messageCreate', async (message) => {
         ? 'Use `!kill` or `!catch` to claim the full bounty!'
         : `Use \`!catch\` for the full reward (**${bounty.cost} coins**) or \`!kill\` for a reduced payout (**${Math.floor(bounty.cost / 4)} coins**).`;
       const bossWarning = bounty.isBoss
-        ? '\n\n⚠️ **BOSS BOUNTY!** If you fail, this outlaw will steal **1–30 coins** from you!'
+        ? '\n\n⚠️ **BOSS BOUNTY!** If you fail, this outlaw will steal **1–15 coins** from you!'
         : '';
       message.reply(
         `\uD83E\uDDFF **Eagle Eye Activated!** You spotted **${bounty.isBoss ? '⭐ ' : ''}${bounty.name}** hiding in the shadows!\n\n` +
@@ -2794,10 +2832,10 @@ client.on('messageCreate', async (message) => {
     } else {
       const quote = action === 'catch' ? randomQuote(QUOTES_FAIL_ALIVE) : randomQuote(QUOTES_FAIL_DEAD);
 
-      // Boss bounty: steal 1–30 coins from the player on failure
+      // Boss bounty: steal 1–15 coins from the player on failure
       let bossStealLine = '';
       if (bounty.isBoss) {
-        const stolen = Math.floor(Math.random() * 30) + 1;
+        const stolen = Math.floor(Math.random() * 15) + 1;
         let currentCoins = userCoins.get(userId);
         if (currentCoins === undefined) {
           await loadUserData(userId);
@@ -2882,7 +2920,8 @@ client.on('messageCreate', async (message) => {
 
       `**🤠 Bounties**\n` +
       `\`!addbounty <name> <cost> <deadoralive/alive>\` — Post a new bounty\n` +
-      `\`!addbossbounty <name> <cost> <deadoralive/alive>\` — Post a ⭐ boss bounty (steals 1–30 coins on failure)\n\n` +
+      `\`!addbossbounty <name> <cost> <deadoralive/alive>\` — Post a ⭐ boss bounty (steals 1–15 coins on failure)\n` +
+      `\`!deletebounty <id>\` — Remove an active bounty\n\n` +
 
       `**🏅 Winner**\n` +
       `\`!winner @user\` — Apply winner restrictions (45 days)\n` +
