@@ -789,6 +789,7 @@ function getAchievementProgress(userId) {
 
 // Train robbery
 const TRAIN_CHANNELS = ['1506260153551552512', '1265305843331497995'];
+const TRAIN_ROLE_ID = '1265303728668414064';
 const TRAIN_DURATION_MS = 30 * 60 * 1000;
 const BOSS_TRAIN_DURATION_MS = 60 * 60 * 1000; // 1 hour
 const BOSS_TRAIN_COINS = 1000;
@@ -822,6 +823,7 @@ const pendingDuels = new Map();
 
 // Active train heist (null when no train)
 let activeTrain = null;
+let trainTransitionInProgress = false;
 
 // Blackjack deck and logic
 const CARD_SUITS = ['♠️', '♥️', '♣️', '♦️'];
@@ -993,8 +995,23 @@ function getRandomItem(itemsArray) {
   return itemsArray[0];
 }
 
+async function openTrainChannel(message) {
+  trainTransitionInProgress = true;
+  try {
+    await message.channel.permissionOverwrites.edit(TRAIN_ROLE_ID, { SendMessages: true });
+    return true;
+  } catch (error) {
+    console.error('Error enabling train channel messages:', error);
+    await message.reply('Could not start the train: I could not enable Send Messages for the train role. Check my channel permissions.');
+    return false;
+  } finally {
+    trainTransitionInProgress = false;
+  }
+}
+
 async function endTrain(reason = 'timeout') {
-  if (!activeTrain) return;
+  if (!activeTrain || trainTransitionInProgress) return;
+  trainTransitionInProgress = true;
 
   const { channelId, timeoutId } = activeTrain;
   if (timeoutId) clearTimeout(timeoutId);
@@ -1008,15 +1025,20 @@ async function endTrain(reason = 'timeout') {
     endMessage = 'The train heist was stopped by an admin.';
   }
 
-  activeTrain = null;
-
-  if (!endMessage) return;
-
   try {
-    const channel = await client.channels.fetch(channelId).catch(() => null);
-    if (channel) await channel.send(endMessage);
+    const channel = await client.channels.fetch(channelId);
+    try {
+      await channel.permissionOverwrites.edit(TRAIN_ROLE_ID, { SendMessages: false });
+    } catch (error) {
+      console.error('Error disabling train channel messages:', error);
+      await channel.send('The train has ended, but I could not disable Send Messages for the train role. Please disable it manually and check my channel permissions.');
+    }
+    if (endMessage) await channel.send(endMessage);
   } catch (error) {
-    console.error('Error sending train end message:', error);
+    console.error('Error closing train channel:', error);
+  } finally {
+    activeTrain = null;
+    trainTransitionInProgress = false;
   }
 }
 
@@ -1162,6 +1184,44 @@ client.on('guildMemberAdd', async (member) => {
 client.on('messageCreate', async (message) => {
   // Ignore messages from bots
   if (message.author.bot) return;
+
+  // Find a Discord user, including users who are not in this server (admin only).
+  if (/^!finduser(?:\s|$)/i.test(message.content)) {
+    if (message.author.id !== ADMIN_USER_ID) return;
+    if (!message.guild) {
+      await message.reply('Use this command in a server to check membership.');
+      return;
+    }
+
+    const args = message.content.trim().split(/\s+/);
+    const match = args[1]?.match(/^(?:<@!?(\d{17,20})>|(\d{17,20}))$/);
+    if (args.length !== 2 || !match) {
+      await message.reply('Usage: `!finduser @user` or `!finduser <UserID>`');
+      return;
+    }
+
+    const userId = match[1] || match[2];
+    try {
+      const user = await client.users.fetch(userId, { force: true });
+      let member = null;
+      try {
+        member = await message.guild.members.fetch({ user: userId, force: true });
+      } catch (error) {
+        // Only Unknown Member confirms absence; other failures must not report a false result.
+        if (error.code !== 10007) throw error;
+      }
+      await message.reply({
+        content: `Display name: ${member?.displayName || user.globalName || user.username}\nUsername: @${user.username}\nUser ID: ${user.id}\nIn this server: **${member ? 'Yes' : 'No'}**`,
+        allowedMentions: { parse: [] },
+      });
+    } catch (error) {
+      console.error('Error finding user:', error);
+      await message.reply(error.code === 10013
+        ? 'No Discord user was found with that ID.'
+        : 'Could not look up this user or verify server membership. Please try again.');
+    }
+    return;
+  }
 
   // Check if the message is the lootbox command
   if (message.content.toLowerCase() === '!lootbox') {
@@ -1887,13 +1947,15 @@ client.on('messageCreate', async (message) => {
     if (!TRAIN_CHANNELS.includes(message.channel.id)) return;
     if (message.author.id !== ADMIN_USER_ID) return;
 
-    if (activeTrain) {
+    if (activeTrain || trainTransitionInProgress) {
       message.reply('A train is already at the station! Wait for it to leave before starting another heist.');
       return;
     }
 
     const channelId = message.channel.id;
     const trainCoins = TRAIN_COIN_POOLS[Math.floor(Math.random() * TRAIN_COIN_POOLS.length)];
+
+    if (!await openTrainChannel(message)) return;
 
     const timeoutId = setTimeout(() => {
       endTrain('timeout').catch(err => console.error('Error ending train:', err));
@@ -1912,6 +1974,11 @@ client.on('messageCreate', async (message) => {
     if (!TRAIN_CHANNELS.includes(message.channel.id)) return;
     if (message.author.id !== ADMIN_USER_ID) return;
 
+    if (trainTransitionInProgress) {
+      await message.reply('The train is starting or stopping. Please try again in a moment.');
+      return;
+    }
+
     if (!activeTrain) {
       message.reply('There is no active train heist to stop.');
       return;
@@ -1926,12 +1993,14 @@ client.on('messageCreate', async (message) => {
     if (!TRAIN_CHANNELS.includes(message.channel.id)) return;
     if (message.author.id !== ADMIN_USER_ID) return;
 
-    if (activeTrain) {
+    if (activeTrain || trainTransitionInProgress) {
       message.reply('A train is already at the station! Wait for it to leave before starting another heist.');
       return;
     }
 
     const channelId = message.channel.id;
+
+    if (!await openTrainChannel(message)) return;
 
     const timeoutId = setTimeout(() => {
       endTrain('timeout').catch(err => console.error('Error ending boss train:', err));
@@ -1959,6 +2028,7 @@ client.on('messageCreate', async (message) => {
   // Rob command — attempt to rob the active train
   if (message.content.toLowerCase() === '!rob') {
     if (!TRAIN_CHANNELS.includes(message.channel.id)) return;
+    if (trainTransitionInProgress) return;
 
     if (!activeTrain) {
       message.reply("There's no train at the station right now!");
@@ -2932,7 +3002,8 @@ client.on('messageCreate', async (message) => {
       `\`!channelunban @user #channel\` — Remove a channel ban\n\n` +
 
       `**🎮 Bot Status**\n` +
-      `\`!status <type> <text>\` — Change the bot's status\n` +
+      `\`!finduser @user\` - Show a user's names and server membership (also accepts a user ID)\n` +
+      `\`!status <type> <text>\` - Change the bot's status\n` +
       `Types: \`playing\`, \`streaming\`, \`listeningto\`, \`watching\`, \`competing\``;
 
     await message.reply(userCommands);

@@ -56,6 +56,17 @@ You should see "✅ Logged in as [BotName]!" in the console.
 
 ## Usage
 
+### Admin commands
+
+Only user `334000664130617345` can use these commands:
+
+- `!finduser @user` (or `!finduser <UserID>`) shows the user's display name, username, and whether they are in the current server.
+- `!train` and `!bosstrain` enable **Send Messages** for role `1265303728668414064` in the train's channel. Access is disabled when the train times out, runs out of coins, or is stopped with `!stoptrain`, including when stopped from another allowed train channel.
+
+Train commands remain limited to the configured train channels. The bot needs **Manage Roles** and sufficient role hierarchy to edit channel permission overwrites for the train role. Other permission overwrite settings are preserved. If opening the channel fails, the train does not start; closing failures are reported in the channel.
+
+Run command regression checks with `node --test`.
+
 In any channel where the bot has access, type:
 
 ```
